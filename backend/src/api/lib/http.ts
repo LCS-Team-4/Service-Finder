@@ -6,6 +6,10 @@ const limiters = new Map<string, RateLimiter>()
 export function setRateLimit(name: string, maxCalls: number, windowMs: number) {
   limiters.set(name, new RateLimiter(maxCalls, windowMs))
 }
+export function requireEnv(name: string, value: string | undefined): string {
+  if (!value) throw new Error(`${name} is not configured`)
+  return value
+}
 
 export async function request<T = any>(
   baseUrl: string,
@@ -15,17 +19,20 @@ export async function request<T = any>(
     headers?: Record<string, string>
     params?: Record<string, string | number>
     body?: unknown
-    retries?: number          // default 1
-    limiter?: string          // "which API budget this call uses"
+    retries?: number         
+    limiter?: string          
   } = {}
 ): Promise<T> {
   const url = new URL(baseUrl + path)
   for (const [k, v] of Object.entries(options.params ?? {})) {
     url.searchParams.set(k, String(v))
   }
- //added before fetch request
-  const limiter = options.limiter ? limiters.get(options.limiter) : undefined
-  if (limiter) await limiter.waitForSlot()
+
+  const limiterName = options.limiter
+  if (limiterName !== undefined) {
+    const limiter = limiters.get(limiterName)
+    if (limiter) await limiter.waitForSlot()
+  }
 
   const res = await fetch(url, {
     method: options.method ?? 'GET',
