@@ -1,12 +1,10 @@
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-import {RateLimiter} from './rate_limit'
+import { RateLimiter } from './rate_limit'
 
-const Limiters=new Map<string,string>()
-export function  setRateLimit(name:string,
-    maxCalls:number,
-    windowMs:number
-){
-    Limiters.set(name,new RateLimiter(maxCalls,windowMs))
+const limiters = new Map<string, RateLimiter>()
+
+export function setRateLimit(name: string, maxCalls: number, windowMs: number) {
+  limiters.set(name, new RateLimiter(maxCalls, windowMs))
 }
 
 export async function request<T = any>(
@@ -25,6 +23,9 @@ export async function request<T = any>(
   for (const [k, v] of Object.entries(options.params ?? {})) {
     url.searchParams.set(k, String(v))
   }
+ //added before fetch request
+  const limiter = options.limiter ? limiters.get(options.limiter) : undefined
+  if (limiter) await limiter.waitForSlot()
 
   const res = await fetch(url, {
     method: options.method ?? 'GET',
