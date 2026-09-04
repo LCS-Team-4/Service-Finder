@@ -6,6 +6,11 @@ const limiters = new Map<string, RateLimiter>()
 export function setRateLimit(name: string, maxCalls: number, windowMs: number) {
   limiters.set(name, new RateLimiter(maxCalls, windowMs))
 }
+
+export async function waitForRateLimit(name: string): Promise<void> {
+  const limiter = limiters.get(name)
+  if (limiter) await limiter.waitForSlot()
+}
 export function requireEnv(name: string, value: string | undefined): string {
   if (!value) throw new Error(`${name} is not configured`)
   return value
@@ -29,10 +34,7 @@ export async function request<T = any>(
   }
 
   const limiterName = options.limiter
-  if (limiterName !== undefined) {
-    const limiter = limiters.get(limiterName)
-    if (limiter) await limiter.waitForSlot()
-  }
+  if (limiterName !== undefined) await waitForRateLimit(limiterName)
 
   const res = await fetch(url, {
     method: options.method ?? 'GET',
@@ -51,7 +53,11 @@ export async function request<T = any>(
     await sleep(waitMs)
     return request(baseUrl, path, { ...options, retries: retries - 1 })
   }
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${url}`)
+  if (!res.ok) {
+    const safeUrl = new URL(url)
+    safeUrl.searchParams.delete('apiKey')
+    throw new Error(`${res.status} ${res.statusText}: ${safeUrl}`)
+  }
   return res.json()
 
 

@@ -45,6 +45,18 @@ Free-tier Maps APIs cap daily requests and can throttle or go down. This structu
 
 See `docs/roadblock-notes.md` for the full plan.
 
+## API import flow
+
+API imports should use this sequence:
+
+1. Send the external request through its client in `backend/src/api`, using `request()` with a named rate limiter.
+2. Map the response into the database row shape.
+3. Send rows through `upsertToSupabase()`, which splits them into batches and waits between Supabase calls.
+
+Do not call `fetch()` directly for imports or send all mapped rows in one upsert. Add a separate limiter with `setRateLimit()` when introducing another external API.
+
+The service import can be tested with `POST /api/admin/import/services` and the `x-admin-import-token` header matching `ADMIN_IMPORT_TOKEN`. Automatic imports are disabled unless `IMPORT_INTERVAL_MS` is set to a positive value. Both callers use the same import lock, Geoapify limiter, and Supabase batch limiter.
+
 ## Getting Started
 1. `cd frontend && npm install`
 2. `cd backend && npm install`
