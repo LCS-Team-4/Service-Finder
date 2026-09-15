@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase'
+import { HttpError } from '../utils/httpError'
 
 export interface ServiceDetails {
     id: string
@@ -26,7 +27,7 @@ export async function fetchServiceDetails(externalId: string): Promise<ServiceDe
     const normalizedExternalId = externalId.trim()
 
     if (!normalizedExternalId) {
-        throw new Error('A service external_id is required')
+        throw new HttpError(400, 'A service external_id is required')
     }
 
     const { data, error } = await supabase
