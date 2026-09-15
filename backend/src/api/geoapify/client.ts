@@ -6,6 +6,16 @@ setRateLimit('geoapify', 10, 60_000)
 
 
 const geoapifyUrl = requireEnv('GEOAPIFY_URL', process.env.GEOAPIFY_URL)
+const southAfricaRegions = [
+  [16.45, -34.85, 20.58, -28.48],
+  [20.58, -34.85, 24.7, -28.48],
+  [24.7, -34.85, 28.82, -28.48],
+  [28.82, -34.85, 32.95, -28.48],
+  [16.45, -28.48, 20.58, -22.1],
+  [20.58, -28.48, 24.7, -22.1],
+  [24.7, -28.48, 28.82, -22.1],
+  [28.82, -28.48, 32.95, -22.1],
+] as const
 
 export function geopaify(key: string, format: 'json' | 'xml' = 'json' ) {
   return {
@@ -30,9 +40,7 @@ export async function importServices(
 
   try {
     const categoryMap = await ensureServiceCategories()
-    const data = await geopaify(key).get(path,{
-
-      categories: [
+    const categories = [
         'office.government.migration',
         'office.government.public_service',
         'service.fire_station',
@@ -44,12 +52,26 @@ export async function importServices(
         'education.library',
         'education.school',
         'service.police',
-      ].join(','),
-      filter: 'rect:16.45,-35.15,24.85,-28.45', // Western Cape bounding box
-      limit: 300
-    })
+      ].join(',')
+      const features: any[] = []
 
-    const services = data.features.flatMap((feature: any) => {
+      for (const [west, south, east, north] of southAfricaRegions) {
+        const pageSize = 300
+        const maxPages = Math.max(1, Number(process.env.GEOAPIFY_MAX_PAGES ?? 3))
+        for (let page = 0; page < maxPages; page++) {
+          const data = await geopaify(key).get(path, {
+            categories,
+            filter: `rect:${west},${south},${east},${north}`,
+            limit: pageSize,
+            offset: page * pageSize,
+          })
+          const pageFeatures = data.features ?? []
+          features.push(...pageFeatures)
+          if (pageFeatures.length < pageSize) break
+        }
+      }
+
+      const services = features.flatMap((feature: any) => {
       const props = feature.properties
       const address = typeof props.formatted === 'string' ? props.formatted.trim() : ''
       const name = typeof props.name === 'string' ? props.name.trim() : ''
