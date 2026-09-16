@@ -38,3 +38,26 @@ export class LocationDeclinedError extends Error {
     this.name = 'LocationDeclinedError'
   }
 }
+
+const STORAGE_KEY = 'service-finder.location.mode'
+const DEFAULT_MODE: LocationMode = 'approximate'
+
+export function getStoredMode(): LocationMode {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored === 'exact' || stored === 'approximate' || stored === 'declined') {
+      return stored
+    }
+    return DEFAULT_MODE
+  } catch {
+    return DEFAULT_MODE
+  }
+}
+
+export function setStoredMode(mode: LocationMode): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, mode)
+  } catch {
+    // Silently fail — the mode won't persist, but the app keeps working.
+  }
+}
