@@ -15,6 +15,8 @@ export interface ServiceDetails {
     } | null
     formatted_address: string
     location: string
+    lat: number
+    lng: number
     opening_hours: string | null
     website: string | null
     phone: string | null
