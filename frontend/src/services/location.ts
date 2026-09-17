@@ -265,3 +265,41 @@ export async function getApproximateLocation(): Promise<ResolvedLocation> {
     clearTimeout(timeoutId)
   }
 }
+
+export async function resolveLocation(
+  mode: LocationMode,
+): Promise<ResolvedLocation> {
+  if (mode === 'declined') {
+    throw new LocationDeclinedError(
+      'Location mode is set to declined',
+    )
+  }
+
+  if (mode === 'exact') {
+    return getExactLocation()
+  }
+
+  // mode === 'approximate' (the only remaining case)
+  return getApproximateLocation()
+}
+
+export type GeolocationPermission =
+  | 'granted'
+  | 'denied'
+  | 'prompt'
+  | 'unsupported'
+
+export async function getCurrentPermission(): Promise<GeolocationPermission> {
+  if (!navigator.permissions) {
+    return 'unsupported'
+  }
+
+  try {
+    const status = await navigator.permissions.query({
+      name: 'geolocation' as PermissionName,
+    })
+    return status.state as GeolocationPermission
+  } catch {
+    return 'unsupported'
+  }
+}
