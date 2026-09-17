@@ -213,3 +213,55 @@ export function watchExactLocation(
 
   return stop
 }
+
+let cachedApproximateLocation: ResolvedLocation | null = null
+
+export async function getApproximateLocation(): Promise<ResolvedLocation> {
+  if (cachedApproximateLocation) return cachedApproximateLocation
+
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 5000)
+
+  try {
+    const response = await fetch('https://ipwho.is/', {
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      throw new Error(`Approximate location lookup failed (HTTP ${response.status})`)
+    }
+
+    const data = await response.json()
+
+    if (data && data.success === false) {
+      throw new Error(data.message || 'Approximate location lookup failed')
+    }
+
+    if (typeof data.latitude !== 'number' || typeof data.longitude !== 'number') {
+      throw new Error('Approximate location lookup returned invalid coordinates')
+    }
+
+    const label =
+      [data.city, data.region].filter(Boolean).join(', ') || undefined
+
+    const location: ResolvedLocation = {
+      mode: 'approximate',
+      lat: data.latitude,
+      lng: data.longitude,
+      accuracyMeters: 5000,
+      label,
+      timestamp: Date.now(),
+    }
+
+    cachedApproximateLocation = location
+    return location
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Approximate location lookup timed out')
+    }
+    if (error instanceof Error) throw error
+    throw new Error('Approximate location lookup failed')
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
