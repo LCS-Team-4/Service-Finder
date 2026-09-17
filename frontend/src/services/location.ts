@@ -61,3 +61,43 @@ export function setStoredMode(mode: LocationMode): void {
     // Silently fail — the mode won't persist, but the app keeps working.
   }
 }
+
+export async function getExactLocation(): Promise<ResolvedLocation> {
+  if (!navigator.geolocation) {
+    throw new Error('Geolocation is not supported by this browser')
+  }
+
+  return new Promise<ResolvedLocation>((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({
+          mode: 'exact',
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracyMeters: position.coords.accuracy,
+          timestamp: position.timestamp,
+        })
+      },
+      (error) => {
+        if (error.code === error.PERMISSION_DENIED) {
+          reject(new LocationDeclinedError('Location permission denied'))
+          return
+        }
+        if (error.code === error.POSITION_UNAVAILABLE) {
+          reject(new Error('Position unavailable'))
+          return
+        }
+        if (error.code === error.TIMEOUT) {
+          reject(new Error('Location request timed out'))
+          return
+        }
+        reject(new Error(error.message || 'Failed to get location'))
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10_000,
+        maximumAge: 60_000,
+      },
+    )
+  })
+}
