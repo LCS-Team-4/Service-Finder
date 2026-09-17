@@ -101,3 +101,115 @@ export async function getExactLocation(): Promise<ResolvedLocation> {
     )
   })
 }
+
+export interface WatchExactLocationOptions {
+  /** Minimum time between onUpdate callbacks, in milliseconds. Default 3000. */
+  throttleMs?: number
+}
+
+export function watchExactLocation(
+  onUpdate: (location: ResolvedLocation) => void,
+  onError: (error: Error) => void,
+  options: WatchExactLocationOptions = {},
+): () => void {
+  if (!navigator.geolocation) {
+    throw new Error('Geolocation is not supported by this browser')
+  }
+
+  const throttleMs = options.throttleMs ?? 3000
+
+  let lastEmit = 0
+  let pendingTimer: ReturnType<typeof setTimeout> | null = null
+  let pendingLocation: ResolvedLocation | null = null
+  let stopped = false
+  let watchId: number | null = null
+
+  const clearPendingTimer = () => {
+    if (pendingTimer !== null) {
+      clearTimeout(pendingTimer)
+      pendingTimer = null
+    }
+    pendingLocation = null
+  }
+
+  const stop = () => {
+    if (stopped) return
+    stopped = true
+    if (watchId !== null) {
+      navigator.geolocation.clearWatch(watchId)
+      watchId = null
+    }
+    clearPendingTimer()
+  }
+
+  const emit = (location: ResolvedLocation) => {
+    lastEmit = Date.now()
+    onUpdate(location)
+  }
+
+  const handleSuccess = (position: GeolocationPosition) => {
+    if (stopped) return
+
+    const location: ResolvedLocation = {
+      mode: 'exact',
+      lat: position.coords.latitude,
+      lng: position.coords.longitude,
+      accuracyMeters: position.coords.accuracy,
+      timestamp: position.timestamp,
+    }
+
+    const now = Date.now()
+    const elapsed = now - lastEmit
+
+    if (elapsed >= throttleMs) {
+      clearPendingTimer()
+      emit(location)
+      return
+    }
+
+    pendingLocation = location
+    if (pendingTimer === null) {
+      pendingTimer = setTimeout(() => {
+        pendingTimer = null
+        if (stopped || pendingLocation === null) return
+        const queued = pendingLocation
+        pendingLocation = null
+        emit(queued)
+      }, throttleMs - elapsed)
+    }
+  }
+
+  const handleError = (error: GeolocationPositionError) => {
+    if (stopped) return
+
+    if (error.code === error.PERMISSION_DENIED) {
+      onError(new LocationDeclinedError('Location permission denied'))
+      stop()
+      return
+    }
+
+    if (error.code === error.POSITION_UNAVAILABLE) {
+      onError(new Error('Position unavailable'))
+      return
+    }
+
+    if (error.code === error.TIMEOUT) {
+      onError(new Error('Location request timed out'))
+      return
+    }
+
+    onError(new Error(error.message || 'Failed to watch location'))
+  }
+
+  watchId = navigator.geolocation.watchPosition(
+    handleSuccess,
+    handleError,
+    {
+      enableHighAccuracy: true,
+      timeout: 10_000,
+      maximumAge: 60_000,
+    },
+  )
+
+  return stop
+}
