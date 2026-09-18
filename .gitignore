@@ -25,3 +25,7 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+
+# Tooling output
+repomix-output.txt
+repomix-output-v*.txt

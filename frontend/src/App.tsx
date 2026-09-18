@@ -21,8 +21,8 @@ function App() {
         <Route path="/dashboard" element={<ProtectedDashboard />} />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
-      </BrowserRouter>
-      );
+    </BrowserRouter>
+  );
 }
 
 export default App;

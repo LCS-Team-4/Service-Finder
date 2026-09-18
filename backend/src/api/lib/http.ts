@@ -56,7 +56,20 @@ export async function request<T = any>(
   if (!res.ok) {
     const safeUrl = new URL(url)
     safeUrl.searchParams.delete('apiKey')
-    throw new Error(`${res.status} ${res.statusText}: ${safeUrl}`)
+    safeUrl.searchParams.delete('key')
+    const responseText = await res.text()
+    let upstreamMessage = responseText
+
+    try {
+      const responseBody = JSON.parse(responseText) as {
+        detailedError?: { message?: string }
+      }
+      upstreamMessage = responseBody.detailedError?.message ?? responseText
+    } catch {
+      // Keep the raw response when the upstream service does not return JSON.
+    }
+
+    throw new Error(`${res.status} ${res.statusText}: ${upstreamMessage} (${safeUrl})`)
   }
   return res.json()
 
