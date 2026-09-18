@@ -7,7 +7,7 @@ setRateLimit('geoapify', 10, 60_000)
 
 const geoapifyUrl = process.env.GEOAPIFY_URL || 'https://api.geoapify.com/v2/places'
 
-export function geopaify(key: string, format: 'json' | 'xml' = 'json' ) {
+export function geoapifyClient(key: string, format: 'json' | 'xml' = 'json') {
   return {
     get: (path: string, extraParams: Record<string, string | number> = {}) =>
       request(geoapifyUrl, path, {
@@ -30,7 +30,7 @@ export async function importServices(
 
   try {
     const categoryMap = await ensureServiceCategories()
-    const data = await geopaify(key).get(path,{
+    const data = await geoapifyClient(key).get(path,{
 
       categories: [
         'office.government.migration',
