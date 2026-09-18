@@ -37,7 +37,8 @@ export async function importServices(
 ) {
   if (importInProgress) return { imported: 0, skipped: true }
   importInProgress = true
-
+   
+  //makes the categories more readible
   try {
     const categoryMap = await ensureServiceCategories()
     const categories = [
@@ -55,6 +56,7 @@ export async function importServices(
       ].join(',')
       const features: any[] = []
 
+      //targets regions of south africa for api calls to send to supabase
       for (const [west, south, east, north] of southAfricaRegions) {
         const pageSize = 300
         const maxPages = Math.max(1, Number(process.env.GEOAPIFY_MAX_PAGES ?? 3))

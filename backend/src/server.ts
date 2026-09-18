@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 
 import serviceRoutes from './routes/serviceRoutes';
+import accidentRoutes from './routes/accidentRoutes';
 import authRoutes from './routes/authRoutes';
 import adminRoutes from './routes/adminRoutes';
 import { importServices } from './api/geoapify/client';
@@ -13,6 +14,7 @@ app.use(cors());
 app.use(express.json());
 
 app.use('/api/services', serviceRoutes);
+app.use('/api/traffic-incidents', accidentRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use(notFoundHandler);

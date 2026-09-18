@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { getAccidentDetails} from '../controllers/accidentController'
+import { getAccidentDetails, getTrafficIncidents } from '../controllers/accidentController'
 const router = Router();
 
-router.get
+router.get('/', getTrafficIncidents)
 router.get('/:externalId', getAccidentDetails);
 
 

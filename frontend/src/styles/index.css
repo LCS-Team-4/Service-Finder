@@ -511,6 +511,26 @@ input {
   color: #fff6d8;
   background: var(--marker);
 }
+.traffic-marker-wrap {
+  background: none !important;
+  border: 0 !important;
+}
+.traffic-marker {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 2px solid #fff8e8;
+  border-radius: 50%;
+  color: #fff8e8;
+  box-shadow: 0 2px 5px #4d301f99;
+}
+.traffic-marker.traffic {
+  background: #b5362d;
+}
+.traffic-marker.road-works {
+  background: #c56a24;
+}
 .leaflet-tooltip {
   border: 1px solid #8d6337 !important;
   border-radius: 0 !important;

@@ -5,7 +5,9 @@ import {
   Bookmark,
   Accessibility,
   Bus,
+  CarFront,
   Clock3,
+  Construction,
   Flame,
   Globe,
   GraduationCap,
@@ -29,7 +31,9 @@ import {
   X,
 } from "lucide-react";
 import { useServices } from "./hooks/useServices";
+import { useTrafficIncidents } from "./hooks/useTrafficIncidents";
 import type { Service } from "./types/service.types";
+import type { TrafficCoordinate, TrafficIncident } from "./types/traffic.types";
 
 declare const L: any;
 type Category = string;
@@ -59,6 +63,33 @@ const toPlace = (service: Service): Place | null => {
   const coordinates = getCoordinates(service.location);
   if (!coordinates || coordinates.some((coordinate) => !Number.isFinite(coordinate))) return null;
   return { ...service, category: service.category?.name ?? service.type ?? "Service", lat: coordinates[1], lng: coordinates[0] };
+};
+
+const isRoadWorks = (incident: TrafficIncident) => incident.icon_category === 9;
+const trafficIcon = (incident: TrafficIncident, size = 15) => {
+  const props = { size, strokeWidth: 2.4 };
+  return isRoadWorks(incident) ? <Construction {...props} /> : <CarFront {...props} />;
+};
+const parseIncidentGeometry = (geometry: unknown): TrafficCoordinate[] => {
+  if (geometry && typeof geometry === "object" && "coordinates" in geometry) {
+    const coordinates = (geometry as { coordinates?: unknown }).coordinates;
+    if (Array.isArray(coordinates)) {
+      return coordinates.filter(
+        (coordinate): coordinate is TrafficCoordinate =>
+          Array.isArray(coordinate) && coordinate.length >= 2 &&
+          typeof coordinate[0] === "number" && typeof coordinate[1] === "number",
+      );
+    }
+  }
+  if (typeof geometry !== "string") return [];
+  const wkt = geometry.match(/LINESTRING\s*\(([^)]+)\)/i);
+  if (!wkt) return [];
+  return wkt[1].split(",").flatMap((pair) => {
+    const [longitude, latitude] = pair.trim().split(/\s+/).map(Number);
+    return Number.isFinite(longitude) && Number.isFinite(latitude)
+      ? [[longitude, latitude] as TrafficCoordinate]
+      : [];
+  });
 };
 
 const categoryIcon = (category: Category, size = 14) => {
@@ -91,17 +122,20 @@ const categoryIcon = (category: Category, size = 14) => {
 
 function LeafletMap({
   places,
+  incidents,
   selected,
   onSelect,
   mapRef,
 }: {
   places: Place[];
+  incidents: TrafficIncident[];
   selected: Place | null;
   onSelect: (place: Place) => void;
   mapRef: React.MutableRefObject<any>;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const layer = useRef<any>(null);
+  const incidentLayer = useRef<any>(null);
   useEffect(() => {
     if (!root.current || !L) return;
     const map = L.map(root.current, {
@@ -114,8 +148,38 @@ function LeafletMap({
     }).addTo(map);
     mapRef.current = map;
     layer.current = L.layerGroup().addTo(map);
+    incidentLayer.current = L.layerGroup().addTo(map);
     return () => map.remove();
   }, [mapRef]);
+  useEffect(() => {
+    if (!incidentLayer.current) return;
+    incidentLayer.current.clearLayers();
+    incidents.forEach((incident) => {
+      const coordinates = parseIncidentGeometry(incident.geometry);
+      if (coordinates.length < 2) return;
+      const roadWorks = isRoadWorks(incident);
+      const color = roadWorks ? "#c56a24" : "#b5362d";
+      L.polyline(coordinates.map(([longitude, latitude]) => [latitude, longitude]), {
+        color,
+        weight: 5,
+        opacity: 0.82,
+        dashArray: roadWorks ? "8 7" : undefined,
+      }).addTo(incidentLayer.current);
+      const [longitude, latitude] = coordinates[Math.floor(coordinates.length / 2)];
+      const icon = L.divIcon({
+        className: "traffic-marker-wrap",
+        html: `<div class="traffic-marker ${roadWorks ? "road-works" : "traffic"}">${renderToStaticMarkup(trafficIcon(incident))}</div>`,
+        iconSize: [32, 32],
+        iconAnchor: [16, 16],
+      });
+      const marker = L.marker([latitude, longitude], { icon }).addTo(incidentLayer.current);
+      const road = [incident.from_road, incident.to_road].filter(Boolean).join(" to ");
+      marker.bindTooltip(
+        `<strong>${roadWorks ? "Road works" : "Traffic incident"}</strong><br>${incident.description ?? (road || "Reported road event")}`,
+        { direction: "top", offset: [0, -16] },
+      );
+    });
+  }, [incidents]);
   useEffect(() => {
     if (!layer.current) return;
     layer.current.clearLayers();
@@ -148,6 +212,7 @@ function LeafletMap({
 
 function App() {
   const { services, loading, error } = useServices();
+  const { incidents, error: incidentsError } = useTrafficIncidents();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState<Category | null>(null);
   const [selected, setSelected] = useState<Place | null>(null);
@@ -206,6 +271,7 @@ function App() {
     <main className="guide-shell">
       <LeafletMap
         places={visible}
+        incidents={incidents}
         selected={selected}
         onSelect={selectPlace}
         mapRef={mapRef}
@@ -233,6 +299,7 @@ function App() {
       </section>
       {loading && <div className="notice">Loading services...</div>}
       {error && <div className="notice">{error}</div>}
+      {incidentsError && <div className="notice">{incidentsError}</div>}
       {notice && !loading && <div className="notice">{notice}</div>}
       {selected && (
         <section className="service-popup">
