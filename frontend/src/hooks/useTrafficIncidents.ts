@@ -4,6 +4,7 @@ import type { TrafficIncident } from "../types/traffic.types";
 
 export function useTrafficIncidents() {
 	const [incidents, setIncidents] = useState<TrafficIncident[]>([]);
+	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState("");
 
 	useEffect(() => {
@@ -14,11 +15,14 @@ export function useTrafficIncidents() {
 			})
 			.catch((reason: unknown) => {
 				if (active) setError(reason instanceof Error ? reason.message : "Unable to load traffic incidents");
+			})
+			.finally(() => {
+				if (active) setLoading(false);
 			});
 		return () => {
-				active = false;
-			};
+			active = false;
+		};
 	}, []);
 
-	return { incidents, error };
+	return { incidents, loading, error };
 }

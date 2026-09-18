@@ -83,13 +83,38 @@ const parseIncidentGeometry = (geometry: unknown): TrafficCoordinate[] => {
   }
   if (typeof geometry !== "string") return [];
   const wkt = geometry.match(/LINESTRING\s*\(([^)]+)\)/i);
-  if (!wkt) return [];
-  return wkt[1].split(",").flatMap((pair) => {
-    const [longitude, latitude] = pair.trim().split(/\s+/).map(Number);
-    return Number.isFinite(longitude) && Number.isFinite(latitude)
-      ? [[longitude, latitude] as TrafficCoordinate]
-      : [];
-  });
+  if (wkt) {
+    return wkt[1].split(",").flatMap((pair) => {
+      const [longitude, latitude] = pair.trim().split(/\s+/).map(Number);
+      return Number.isFinite(longitude) && Number.isFinite(latitude)
+        ? [[longitude, latitude] as TrafficCoordinate]
+        : [];
+    });
+  }
+  if (!/^[0-9a-f]+$/i.test(geometry) || geometry.length < 18) return [];
+  const bytes = new Uint8Array(geometry.match(/.{2}/g)!.map((pair) => parseInt(pair, 16)));
+  const littleEndian = bytes[0] === 1;
+  const view = new DataView(bytes.buffer);
+  const geometryType = view.getUint32(1, littleEndian);
+  const baseGeometryType = geometryType & 0xff;
+  let pointCountOffset = 5;
+  if ((geometryType & 0x20000000) !== 0) pointCountOffset += 4;
+  const coordinateOffset = pointCountOffset + 4;
+  if (baseGeometryType !== 2 || bytes.length < coordinateOffset) return [];
+  const pointCount = view.getUint32(pointCountOffset, littleEndian);
+  if (pointCount > 10_000) return [];
+  const coordinates: TrafficCoordinate[] = [];
+  for (let index = 0; index < pointCount; index += 1) {
+    const offset = coordinateOffset + index * 16;
+    if (offset + 16 > bytes.length) break;
+    const longitude = view.getFloat64(offset, littleEndian);
+    const latitude = view.getFloat64(offset + 8, littleEndian);
+    if (Number.isFinite(longitude) && Number.isFinite(latitude) &&
+      longitude >= -180 && longitude <= 180 && latitude >= -90 && latitude <= 90) {
+      coordinates.push([longitude, latitude]);
+    }
+  }
+  return coordinates;
 };
 
 const categoryIcon = (category: Category, size = 14) => {
@@ -212,7 +237,7 @@ function LeafletMap({
 
 function App() {
   const { services, loading, error } = useServices();
-  const { incidents, error: incidentsError } = useTrafficIncidents();
+  const { incidents, loading: incidentsLoading, error: incidentsError } = useTrafficIncidents();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState<Category | null>(null);
   const [selected, setSelected] = useState<Place | null>(null);
@@ -298,6 +323,7 @@ function App() {
         </button>
       </section>
       {loading && <div className="notice">Loading services...</div>}
+      {incidentsLoading && <div className="notice">Loading traffic and road works...</div>}
       {error && <div className="notice">{error}</div>}
       {incidentsError && <div className="notice">{incidentsError}</div>}
       {notice && !loading && <div className="notice">{notice}</div>}
