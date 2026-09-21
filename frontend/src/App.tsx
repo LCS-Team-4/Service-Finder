@@ -74,15 +74,18 @@ const categoryIcon = (category: Category, size = 14) => {
 };
 
 function LeafletMap({
-  places, selected, onSelect, mapRef,
+  places, selected, onSelect, mapRef, userLocation,
 }: {
   places: Place[];
   selected: Place | null;
   onSelect: (place: Place) => void;
   mapRef: React.MutableRefObject<any>;
+  userLocation: { lat: number; lng: number; accuracy: number } | null;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const layer = useRef<any>(null);
+  const userMarker = useRef<any>(null);
+  const accuracyCircle = useRef<any>(null);
 
   useEffect(() => {
     if (!root.current || !L) return;
@@ -121,6 +124,43 @@ function LeafletMap({
     }
   }, [places, selected, onSelect]);
 
+    useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !L) return;
+    if (!userLocation) {
+      if (userMarker.current) {
+        map.removeLayer(userMarker.current);
+        userMarker.current = null;
+      }
+      if (accuracyCircle.current) {
+        map.removeLayer(accuracyCircle.current);
+        accuracyCircle.current = null;
+      }
+      return;
+    }
+    const { lat, lng, accuracy } = userLocation;
+    if (!userMarker.current) {
+      const icon = L.divIcon({
+        className: 'user-location-wrap',
+        html: '<span class="user-location-pulse"></span><span class="user-location-dot"></span>',
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+      });
+      userMarker.current = L.marker([lat, lng], { icon, zIndexOffset: 1000 }).addTo(map);
+      accuracyCircle.current = L.circle([lat, lng], {
+        radius: accuracy,
+        color: '#22c55e',
+        weight: 1,
+        fillColor: '#22c55e',
+        fillOpacity: 0.12,
+      }).addTo(map);
+    } else {
+      userMarker.current.setLatLng([lat, lng]);
+      accuracyCircle.current.setLatLng([lat, lng]);
+      accuracyCircle.current.setRadius(accuracy);
+    }
+  }, [userLocation, mapRef]);
+
   return <div className="leaflet-map" ref={root} />;
 }
 
@@ -133,8 +173,11 @@ function CapeGuide() {
   const [aboutOpen,   setAboutOpen] =   useState(false);
   const [legendOpen,  setLegendOpen] =  useState(false);
   const [saved,       setSaved] =       useState<string[]>([]);
-  const [debugOpen,   setDebugOpen] =   useState(true);
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
+  const [tracking,    setTracking] =    useState(false);
   const mapRef =      useRef<any>(null);
+  const watchId =     useRef<number | null>(null);
+  const hasCentered = useRef(false);
 
   const places = useMemo(
     () => services.map(toPlace).filter((place): place is Place => place !== null),
@@ -166,20 +209,53 @@ function CapeGuide() {
     setNotice(first ? `${visible.length} place${visible.length === 1 ? '' : 's'} found` : 'No places found');
   };
 
-  const locate = () => navigator.geolocation?.getCurrentPosition(
-    (pos) => {
-      mapRef.current?.flyTo([pos.coords.latitude, pos.coords.longitude], 14);
-      setNotice('Showing your current location.');
+    useEffect(
+    () => () => {
+      if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
     },
-    () => setNotice('We could not access your location.'),
+    [],
   );
+
+  const locate = () => {
+    if (!navigator.geolocation) {
+    setNotice('Geolocation is not supported on this device.');
+      return;
+    }
+    if (tracking) {
+      if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
+      watchId.current = null;
+      hasCentered.current = false;
+      setTracking(false);
+      setUserLocation(null);
+      setNotice('Live location turned off.');
+      return;
+    }
+    setTracking(true);
+   setNotice('Getting your live location...');
+   watchId.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        setUserLocation({ lat: latitude, lng: longitude, accuracy });
+        if (!hasCentered.current) {
+          mapRef.current?.flyTo([latitude, longitude], 15, { animate: true, duration: 0.7 });
+         hasCentered.current = true;
+       }
+       setNotice('Showing your live location.');
+    },
+        () => {
+        setNotice('We could not access your location.');
+        setTracking(false);
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
+    );
+  };
 
   return (
     <main className="guide-shell">
       <Navbar />
 
       <div className="map-stage">
-        <LeafletMap places={visible} selected={selected} onSelect={selectPlace} mapRef={mapRef} />
+        <LeafletMap places={visible} selected={selected} onSelect={selectPlace} mapRef={mapRef} userLocation={userLocation} />
 
         <header className="masthead">
           <h1>The Cape Guide</h1>
@@ -195,7 +271,11 @@ function CapeGuide() {
             placeholder="Search for a place or service..."
           />
           <button className="search-button" onClick={search}>Search</button>
-          <button className="locate" title="Use my location" onClick={locate}>
+           <button
+            className={`locate${tracking ? ' active' : ''}`}
+            title={tracking ? 'Stop live location' : 'Show my live location'}
+            onClick={locate}
+          >
             <LocateFixed size={17} />
           </button>
         </section>
