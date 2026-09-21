@@ -2,7 +2,7 @@ import { db } from './index';
 import { getServices } from '../services/api';
 import type { Service } from '../types/service.types';
 
-const CACHE_TTL_MS = 60 * 60 * 1000;
+const CACHE_TTL_MS = 6 *60 * 60 * 1000;
 
 // Debug log we can surface on screen
 const debugLog: string[] = [];

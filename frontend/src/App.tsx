@@ -45,6 +45,17 @@ const getCoordinates = (location: Service['location']): [number, number] | null 
   ];
 };
 
+function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
 const toPlace = (service: Service): Place | null => {
   const coordinates = getCoordinates(service.location);
   if (!coordinates || coordinates.some((coordinate) => !Number.isFinite(coordinate))) return null;
@@ -74,12 +85,14 @@ const categoryIcon = (category: Category, size = 14) => {
 };
 
 function LeafletMap({
-  places, selected, onSelect, mapRef,
+  places, selected, onSelect, mapRef, userPosition, radiusMeters,
 }: {
   places: Place[];
   selected: Place | null;
   onSelect: (place: Place) => void;
   mapRef: React.MutableRefObject<any>;
+  userPosition: [number, number] | null;
+  radiusMeters: number;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const layer = useRef<any>(null);
@@ -113,13 +126,27 @@ function LeafletMap({
       marker.bindTooltip(`<strong>${place.name}</strong><br>${place.category}`, { direction: 'top', offset: [0, -38] });
       marker.on('click', () => onSelect(place));
     });
-    if (places.length > 0) {
+    if (places.length > 0 && !userPosition) {
       mapRef.current?.fitBounds(
         L.latLngBounds(places.map((place) => [place.lat, place.lng])),
         { padding: [48, 48], maxZoom: 12 },
       );
     }
-  }, [places, selected, onSelect]);
+  }, [places, selected, onSelect, userPosition]);
+
+  useEffect(() => {
+    if (!mapRef.current || !userPosition) return;
+    const map = mapRef.current;
+    const circle = L.circle(userPosition, {
+      radius: radiusMeters,
+      color: '#005a8a',
+      weight: 1,
+      fillColor: '#08aef0',
+      fillOpacity: 0.08,
+      interactive: false,
+    }).addTo(map);
+    return () => map.removeLayer(circle);
+  }, [userPosition, radiusMeters, mapRef]);
 
   return <div className="leaflet-map" ref={root} />;
 }
@@ -133,7 +160,8 @@ function CapeGuide() {
   const [aboutOpen,   setAboutOpen] =   useState(false);
   const [legendOpen,  setLegendOpen] =  useState(false);
   const [saved,       setSaved] =       useState<string[]>([]);
-  const [debugOpen,   setDebugOpen] =   useState(true);
+  const [userPosition, setUserPosition] = useState<[number, number] | null>(null);
+  const [radiusMeters, setRadiusMeters] = useState(2000);
   const mapRef =      useRef<any>(null);
 
   const places = useMemo(
@@ -147,13 +175,27 @@ function CapeGuide() {
     [places],
   );
 
-  const visible = useMemo(
-    () => places.filter((p) =>
-      (!active || p.category === active) &&
-      `${p.name} ${p.formatted_address ?? ''} ${p.category}`.toLowerCase().includes(query.toLowerCase()),
-    ),
-    [active, places, query],
-  );
+  const visible = useMemo(() => {
+    const filtered = places.filter((p) => {
+      if (active && p.category !== active) return false;
+      if (query && !`${p.name} ${p.formatted_address ?? ''} ${p.category}`
+        .toLowerCase().includes(query.toLowerCase())) return false;
+      if (userPosition) {
+        const d = distanceMeters(userPosition[0], userPosition[1], p.lat, p.lng);
+        if (d > radiusMeters) return false;
+      }
+      return true;
+    });
+
+    if (userPosition) {
+      filtered.sort((a, b) =>
+        distanceMeters(userPosition[0], userPosition[1], a.lat, a.lng) -
+        distanceMeters(userPosition[0], userPosition[1], b.lat, b.lng)
+      );
+    }
+
+    return filtered;
+  }, [active, places, query, userPosition, radiusMeters]);
 
   const selectPlace = useCallback((place: Place) => {
     setSelected(place);
@@ -166,20 +208,36 @@ function CapeGuide() {
     setNotice(first ? `${visible.length} place${visible.length === 1 ? '' : 's'} found` : 'No places found');
   };
 
-  const locate = () => navigator.geolocation?.getCurrentPosition(
-    (pos) => {
-      mapRef.current?.flyTo([pos.coords.latitude, pos.coords.longitude], 14);
-      setNotice('Showing your current location.');
-    },
-    () => setNotice('We could not access your location.'),
-  );
+  const locate = () => {
+    if (!navigator.geolocation) {
+      setNotice('Geolocation is not available on this device.');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+        setUserPosition(coords);
+        mapRef.current?.flyTo(coords, 14, { animate: true, duration: 0.7 });
+        setNotice(`Showing services within ${radiusMeters / 1000} km.`);
+      },
+      () => setNotice('We could not access your location.'),
+      { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 },
+    );
+  };
 
   return (
     <main className="guide-shell">
       <Navbar />
 
       <div className="map-stage">
-        <LeafletMap places={visible} selected={selected} onSelect={selectPlace} mapRef={mapRef} />
+        <LeafletMap
+          places={visible}
+          selected={selected}
+          onSelect={selectPlace}
+          mapRef={mapRef}
+          userPosition={userPosition}
+          radiusMeters={radiusMeters}
+        />
 
         <header className="masthead">
           <h1>The Cape Guide</h1>
@@ -203,6 +261,28 @@ function CapeGuide() {
         {loading && <div className="notice">Loading services...</div>}
         {error && <div className="notice">{error}</div>}
         {notice && !loading && <div className="notice">{notice}</div>}
+
+        {userPosition && (
+          <div className="radius-control">
+            {[1000, 2000, 5000, 10000, 25000].map((r) => (
+              <button
+                key={r}
+                className={radiusMeters === r ? 'active' : ''}
+                onClick={() => setRadiusMeters(r)}
+              >
+                {r / 1000} km
+              </button>
+            ))}
+            <button
+              onClick={() => {
+                setUserPosition(null);
+                setNotice('Showing all services.');
+              }}
+            >
+              All
+            </button>
+          </div>
+        )}
 
         {selected && (
           <section className="service-popup">
@@ -284,8 +364,6 @@ function CapeGuide() {
           <button aria-label="Zoom in" onClick={() => mapRef.current?.zoomIn()}><Plus size={18} /></button>
           <button aria-label="Zoom out" onClick={() => mapRef.current?.zoomOut()}><Minus size={18} /></button>
         </div>
-
- 
       </div>
     </main>
   );

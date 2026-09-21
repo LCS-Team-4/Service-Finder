@@ -36,3 +36,4 @@ backend/package-lock.json
 # Tooling output
 repomix-output.txt
 repomix-output-v*.txt
+repomix-output.xml
