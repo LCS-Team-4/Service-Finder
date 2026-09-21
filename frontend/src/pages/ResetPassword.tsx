@@ -41,12 +41,12 @@ function ResetPassword() {
 	}
 
 	return (
-		<AuthLayout label="Set a new ServiceFinder password">
+		<AuthLayout label="Set a new Cape Guide password">
 			<div className="login-card auth-form-card">
 				<div className="login-heading">
 					<p className="panel-kicker">ACCOUNT RECOVERY</p>
 					<h2>Set New Password</h2>
-					<p>Choose a new password for your<br />ServiceFinder account.</p>
+					<p>Choose a new password for your<br />Cape Guide account.</p>
 				</div>
 				<form onSubmit={handleSubmit} noValidate>
 					{message && <p className={isSuccess ? 'form-success' : 'form-error'} role="alert">{message}</p>}
