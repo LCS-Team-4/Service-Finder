@@ -10,9 +10,9 @@ function AuthLayout({ children, label }: Readonly<AuthLayoutProps>) {
 		<main className="auth-page">
 			<section className="auth-story" aria-label="ServiceFinder introduction">
 				<div className="story-content">
-					<a className="brand" href="/" aria-label="ServiceFinder home">
+					<a className="brand" href="/" aria-label="The Cape Guide home">
 						<span className="brand-mark" aria-hidden="true"><span>⌕</span></span>
-						<span className="brand-name">Service<span>Finder</span></span>
+						<span className="brand-name">THE CAPE <span>GUIDE</span></span>
 					</a>
 
 					<div className="story-copy">
