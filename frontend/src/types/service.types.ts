@@ -25,3 +25,11 @@ export interface Service {
     parent_id: string | null;
   } | null;
 }
+
+export type Category = string;
+
+export type Place = Omit<Service, 'category'> & {
+  category: Category;
+  lat: number;
+  lng: number;
+};
