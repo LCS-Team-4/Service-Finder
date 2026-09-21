@@ -1,11 +1,11 @@
 import { request, setRateLimit, requireEnv } from '../lib/http'
 import { upsertToSupabase } from '../lib/supabase'
 import { ensureServiceCategories, resolveCategorySlug } from '../../services/categoryService'
+import { formatBbox, getNextSouthAfricaArea } from '../../config/southAfricaAreas'
 
 setRateLimit('geoapify', 10, 60_000)
 
-
-const geoapifyUrl = process.env.GEOAPIFY_URL || 'https://api.geoapify.com/v2/places'
+const geoapifyUrl = requireEnv('GEOAPIFY_URL', process.env.GEOAPIFY_URL)
 
 export function geoapifyClient(key: string, format: 'json' | 'xml' = 'json') {
   return {
@@ -17,10 +17,8 @@ export function geoapifyClient(key: string, format: 'json' | 'xml' = 'json') {
   }
 }
 
-
 let importInProgress = false
 
-//sends API data to supabase 
 export async function importServices(
   key = requireEnv('GEOAPIFY_API_KEY', process.env.GEOAPIFY_API_KEY),
   path = ''
@@ -30,26 +28,39 @@ export async function importServices(
 
   try {
     const categoryMap = await ensureServiceCategories()
-    const data = await geoapifyClient(key).get(path,{
 
-      categories: [
-        'office.government.migration',
-        'office.government.public_service',
-        'service.fire_station',
-        'service.social_facility.shelter',
-        'healthcare.hospital',
-        'healthcare.clinic_or_praxis',
-        'healthcare.pharmacy',
-        'healthcare.dentist',
-        'education.library',
-        'education.school',
-        'service.police',
-      ].join(','),
-      filter: 'rect:16.45,-35.15,24.85,-28.45', // Western Cape bounding box
-      limit: 300
-    })
+    const categories = [
+      'office.government.migration',
+      'office.government.public_service',
+      'service.fire_station',
+      'service.social_facility.shelter',
+      'healthcare.hospital',
+      'healthcare.clinic_or_praxis',
+      'healthcare.pharmacy',
+      'healthcare.dentist',
+      'education.library',
+      'education.school',
+      'service.police',
+    ].join(',')
 
-    const services = data.features.flatMap((feature: any) => {
+    const features: any[] = []
+    const area = getNextSouthAfricaArea('geoapify-services')
+
+    const pageSize = 300
+    const maxPages = Math.max(1, Number(process.env.GEOAPIFY_MAX_PAGES ?? 3))
+    for (let page = 0; page < maxPages; page++) {
+      const data = await geoapifyClient(key).get(path, {
+        categories,
+        filter: `rect:${formatBbox(area)}`,
+        limit: pageSize,
+        offset: page * pageSize,
+      })
+      const pageFeatures = data.features ?? []
+      features.push(...pageFeatures)
+      if (pageFeatures.length < pageSize) break
+    }
+
+    const services = features.flatMap((feature: any) => {
       const props = feature.properties
       const address = typeof props.formatted === 'string' ? props.formatted.trim() : ''
       const name = typeof props.name === 'string' ? props.name.trim() : ''
@@ -81,7 +92,7 @@ export async function importServices(
       onConflict: 'external_id',
     })
 
-    return { imported: services.length, skipped: false }
+    return { imported: services.length, area: area.name, skipped: false }
   } finally {
     importInProgress = false
   }

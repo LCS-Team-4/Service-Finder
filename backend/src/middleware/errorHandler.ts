@@ -1,5 +1,4 @@
 import { NextFunction, Request, Response } from 'express'
-import { HttpError } from '../utils/httpError'
 
 export function notFoundHandler(req: Request, res: Response) {
 	res.status(404).json({
@@ -18,9 +17,7 @@ export function errorHandler(
 	console.error('REQUEST ERROR:', error)
 	const isUpstreamError = typeof error === 'object' && error !== null &&
 		'message' in error
-	const status = error instanceof HttpError
-		? error.status
-		: (isUpstreamError ? 502 : 500)
+	const status = isUpstreamError ? 502 : 500
 
 	if (error instanceof Error) {
 		res.status(status).json({ error: error.message })

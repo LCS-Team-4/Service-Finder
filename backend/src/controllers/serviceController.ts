@@ -1,7 +1,6 @@
 import { NextFunction, Request, Response } from 'express'
 import { supabase } from '../config/supabase'
 import { fetchServiceDetails, fetchServicesInRadius, updateServiceDetails, findServiceById } from '../models/Service'
-import { HttpError } from '../utils/httpError'
 
 export async function getServices(req: Request, res: Response, next: NextFunction) {
 	try {
@@ -43,45 +42,6 @@ export async function getServiceDetails(req: Request, res: Response, next: NextF
 	} catch (error) {
 		next(error)
 	}
-}
-
-export async function getNearbyServices(req: Request, res: Response, next: NextFunction) {
-	try {
-		const lat = Number(req.query.lat)
-		const lng = Number(req.query.lng)
-		const radiusKm = Number(req.query.radiusKm ?? 5)
-		const precision = req.query.precision === 'approximate' ? 'approximate' : 'exact'
-		const limit = clamp(Number(req.query.limit ?? 100), 1, 200)
-
-		if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-			throw new HttpError(400, 'lat and lng are required and must be numbers')
-		}
-		if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-			throw new HttpError(400, 'lat/lng out of range')
-		}
-		if (!Number.isFinite(radiusKm) || radiusKm <= 0) {
-			throw new HttpError(400, 'radiusKm must be a positive number')
-		}
-
-		const clampedRadiusKm = clamp(radiusKm, 0.5, 50)
-		const useLat = precision === 'approximate' ? Math.round(lat * 100) / 100 : lat
-		const useLng = precision === 'approximate' ? Math.round(lng * 100) / 100 : lng
-
-		const results = await fetchServicesInRadius(useLat, useLng, clampedRadiusKm * 1000, limit)
-
-		res.json({
-			precision,
-			radiusKm: clampedRadiusKm,
-			count: results.length,
-			results,
-		})
-	} catch (error) {
-		next(error)
-	}
-}
-
-function clamp(value: number, min: number, max: number): number {
-	return Math.min(Math.max(value, min), max)
 }
 
 //update service details 
