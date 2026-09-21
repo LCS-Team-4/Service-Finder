@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { BookOpen, Bookmark, Bus, Clock3, Flame, GraduationCap, Heart, Hospital, House, Landmark, Library, LocateFixed, MapPinned, Minus, Navigation, Phone, Pill, Plus, Search, Shield, ShoppingBag, Smile, Stethoscope, X } from 'lucide-react';
-
+  
 declare const L: any;
 type Category = 'Clinics' | 'Libraries' | 'Shelters' | 'Hospitals' | 'Police Stations' | 'Pharmacies' | 'Dentists' | 'SPCA' | 'Fire Stations' | 'Home Affairs' | 'Malls' | 'Transport' | 'Schools / Universities';
 type Place = { name: string; category: Category; area: string; lat: number; lng: number };

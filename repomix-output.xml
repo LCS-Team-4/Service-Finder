@@ -52,6 +52,7 @@ backend/
       tomtom/
         client.ts
     config/
+      southAfricaAreas.ts
       supabase.ts
     controllers/
       accidentController.ts
@@ -86,6 +87,7 @@ backend/
     utils/
       apiResponse.ts
       generatePassword.ts
+    server.demo.ts
     server.ts
   supabase/
     001_service_categories.sql
@@ -124,6 +126,7 @@ frontend/
     hooks/
       useAuth.ts
       useServices.ts
+      useTrafficIncidents.ts
     pages/
       Admin.tsx
       Dashboard.tsx
@@ -141,6 +144,7 @@ frontend/
       variables.css
     types/
       service.types.ts
+      traffic.types.ts
       user.types.ts
     utils/
       constants.ts
@@ -157,97 +161,70 @@ frontend/
 .gitignore
 package.json
 README.md
+start-demo.bat
 </directory_structure>
 
 <files>
 This section contains the contents of the repository's files.
 
-<file path="frontend/src/db/index.ts">
-import Dexie, { type Table } from 'dexie';
-import type { Service } from '../types/service.types';
-
-export interface MetaRow {
-  key: string;
-  value: string;
+<file path="backend/src/config/southAfricaAreas.ts">
+export type SouthAfricaArea = {
+  name: string
+  bbox: [west: number, south: number, east: number, north: number]
+  center: [latitude: number, longitude: number]
 }
 
-class ServiceFinderDB extends Dexie {
-  services!: Table<Service, string>;
-  meta!: Table<MetaRow, string>;
+const southAfricaAreas: SouthAfricaArea[] = [
+  { name: 'Western Cape', bbox: [16.4, -35.0, 21.0, -30.0], center: [-33.9, 18.4] },
+  { name: 'Garden Route and Karoo', bbox: [21.0, -35.0, 25.5, -30.0], center: [-33.9, 22.5] },
+  { name: 'Eastern Cape', bbox: [25.5, -35.0, 30.0, -30.0], center: [-33.0, 27.9] },
+  { name: 'KwaZulu-Natal coast', bbox: [30.0, -32.0, 33.0, -26.0], center: [-29.6, 31.0] },
+  { name: 'Free State', bbox: [24.0, -30.0, 30.0, -26.0], center: [-29.1, 26.2] },
+  { name: 'Northern Cape', bbox: [16.4, -30.0, 24.0, -22.0], center: [-28.7, 24.7] },
+  { name: 'North West', bbox: [24.0, -26.0, 28.0, -22.0], center: [-25.9, 25.6] },
+  { name: 'Gauteng', bbox: [27.0, -27.5, 30.0, -24.5], center: [-26.2, 28.0] },
+  { name: 'Limpopo', bbox: [27.0, -25.0, 33.0, -22.0], center: [-23.9, 29.5] },
+]
 
-  constructor() {
-    super('servicefinder');
-    this.version(1).stores({
-      services: 'id, category_id, name',
-      meta: 'key',
-    });
+const nextAreaByConsumer = new Map<string, number>()
+
+const trafficAreas = southAfricaAreas.flatMap((area) => {
+  const [west, south, east, north] = area.bbox
+  const tiles: SouthAfricaArea[] = []
+  const tileWidth = 0.75
+  const tileHeight = 0.75
+
+  for (let tileWest = west; tileWest < east; tileWest += tileWidth) {
+    for (let tileSouth = south; tileSouth < north; tileSouth += tileHeight) {
+      const tileEast = Math.min(tileWest + tileWidth, east)
+      const tileNorth = Math.min(tileSouth + tileHeight, north)
+      tiles.push({
+        name: `${area.name} tile ${tiles.length + 1}`,
+        bbox: [tileWest, tileSouth, tileEast, tileNorth],
+        center: [(tileSouth + tileNorth) / 2, (tileWest + tileEast) / 2],
+      })
+    }
   }
+
+  return tiles
+})
+
+export function getNextSouthAfricaArea(consumer: string): SouthAfricaArea {
+  const currentIndex = nextAreaByConsumer.get(consumer) ?? 0
+  const area = southAfricaAreas[currentIndex % southAfricaAreas.length]
+  nextAreaByConsumer.set(consumer, (currentIndex + 1) % southAfricaAreas.length)
+  return area
 }
 
-export const db = new ServiceFinderDB();
-</file>
-
-<file path="frontend/src/db/serviceCache.ts">
-import { db } from './index';
-import { getServices } from '../services/api';
-import type { Service } from '../types/service.types';
-
-const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
-
-async function isCacheStale(): Promise<boolean> {
-  const row = await db.meta.get('services_last_synced');
-  if (!row) return true;
-  return Date.now() - Number(row.value) > CACHE_TTL_MS;
+export function getNextSouthAfricaTrafficArea(): SouthAfricaArea {
+  const currentIndex = nextAreaByConsumer.get('tomtom-accidents') ?? 0
+  const area = trafficAreas[currentIndex % trafficAreas.length]
+  nextAreaByConsumer.set('tomtom-accidents', (currentIndex + 1) % trafficAreas.length)
+  return area
 }
 
-export async function refreshServicesIfStale(): Promise<boolean> {
-  if (!(await isCacheStale())) return false;
-
-  try {
-    const rows = await getServices({ limit: 500 });
-    await db.transaction('rw', db.services, db.meta, async () => {
-      await db.services.clear();
-      await db.services.bulkPut(rows);
-      await db.meta.put({ key: 'services_last_synced', value: String(Date.now()) });
-    });
-    console.log(`[cache] refreshed ${rows.length} services`);
-    return true;
-  } catch (error) {
-    console.warn('[cache] refresh failed, keeping stale cache:', error);
-    return false;
-  }
-}
-
-export async function getCachedServices(): Promise<Service[]> {
-  return db.services.toArray();
-}
-
-export async function forceRefreshServices(): Promise<void> {
-  await db.meta.delete('services_last_synced');
-  await refreshServicesIfStale();
-}
-</file>
-
-<file path="backend/src/controllers/profileController.ts">
-import type { Request, Response } from 'express'
-import jwt from 'jsonwebtoken'
-import {
-getProfilesDb,
-} from '../models/profile'
-
-//fetch profiles
-export const getProfilesCon = async (req: Request, res: Response) => {
-try {
-const result = await getProfilesDb()
-
-if (!result.success) {
-return res.status(400).json(result)
-}
-
-return res.status(200).json(result)
-} catch (error: any) {
-return res.status(500).json({ success: false, error: error.message })
-}
+export function formatBbox(area: SouthAfricaArea) {
+  return area.bbox.join(',')
 }
 </file>
 
@@ -330,10 +307,6 @@ export function requireAdmin(
 }
 </file>
 
-<file path="backend/src/middleware/requestLogger.ts">
-
-</file>
-
 <file path="backend/src/models/accident.ts">
 import { supabase } from '../config/supabase'
 import type { ServiceDetails } from './Service'
@@ -374,10 +347,6 @@ if (error) return { success: false, error: error.message }
 
 return { success: true, data }
 }
-</file>
-
-<file path="backend/src/services/authService.ts">
-
 </file>
 
 <file path="backend/src/services/categoryService.ts">
@@ -631,10 +600,6 @@ export interface Service {
 }
 </file>
 
-<file path="backend/src/utils/apiResponse.ts">
-
-</file>
-
 <file path="backend/src/utils/generatePassword.ts">
 export const generatePassword = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
@@ -644,6 +609,40 @@ export const generatePassword = () => {
   }
   return password
 }
+</file>
+
+<file path="backend/src/server.demo.ts">
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import path from 'path';
+
+import serviceRoutes from './routes/serviceRoutes';
+import authRoutes from './routes/authRoutes';
+import adminRoutes from './routes/adminRoutes';
+import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// API routes
+app.use('/api/services', serviceRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
+
+// Serve the built frontend for demo purposes
+const frontendDist = path.join(__dirname, '../../frontend/dist');
+app.use(express.static(frontendDist));
+app.get(/^(?!\/api).*/, (_req, res) => {
+  res.sendFile(path.join(frontendDist, 'index.html'));
+});
+
+app.use(notFoundHandler);
+app.use(errorHandler);
+
+const PORT = Number(process.env.DEMO_PORT ?? 5050);
+app.listen(PORT, () => console.log(`Demo server running on port ${PORT}`));
 </file>
 
 <file path="backend/supabase/001_service_categories.sql">
@@ -789,6 +788,31 @@ export default Navbar;
 
 <file path="frontend/src/context/AuthContext.tsx">
 
+</file>
+
+<file path="frontend/src/db/index.ts">
+import Dexie, { type Table } from 'dexie';
+import type { Service } from '../types/service.types';
+
+export interface MetaRow {
+  key: string;
+  value: string;
+}
+
+class ServiceFinderDB extends Dexie {
+  services!: Table<Service, string>;
+  meta!: Table<MetaRow, string>;
+
+  constructor() {
+    super('servicefinder');
+    this.version(1).stores({
+      services: 'id, category_id, name',
+      meta: 'key',
+    });
+  }
+}
+
+export const db = new ServiceFinderDB();
 </file>
 
 <file path="frontend/src/hooks/useAuth.ts">
@@ -1087,40 +1111,66 @@ VITE_FIREBASE_PROJECT_ID=
 }
 </file>
 
-<file path="frontend/vite.config.ts">
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
+<file path="start-demo.bat">
+@echo off
+setlocal
 
-export default defineConfig({
-  plugins: [react()],
-});
-</file>
+set REPO=%~dp0
+set BACKEND=%REPO%backend
+set FRONTEND=%REPO%frontend
 
-<file path="backend/src/api/lib/rate_limit.ts">
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+echo ============================================
+echo   Service Finder - Demo Startup
+echo ============================================
+echo.
 
-export class RateLimiter{
-    private calls :number[]=[ ]
+REM --- Step 1: Check that frontend/dist exists ---
+if not exist "%FRONTEND%\dist\index.html" (
+  echo [!] frontend/dist not found. Building frontend first...
+  pushd "%FRONTEND%"
+  call npm run build
+  if errorlevel 1 (
+    echo [X] Frontend build failed. Aborting.
+    popd
+    pause
+    exit /b 1
+  )
+  popd
+)
 
-  constructor(
-    private readonly maxCalls: number,
-    private readonly windowMs: number
-  ) {}
+REM --- Step 2: Kill any stale ngrok or demo server on port 5050 ---
+echo [1/3] Cleaning up stale processes...
+taskkill /F /IM ngrok.exe >nul 2>&1
 
-  async waitForSlot(): Promise<void> {
-    const now = Date.now()
-    this.calls = this.calls.filter((t) => now - t < this.windowMs)
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :5050 ^| findstr LISTENING') do (
+  taskkill /F /PID %%a >nul 2>&1
+)
 
-    if (this.calls.length >= this.maxCalls) {
-      const waitMs = this.calls[0] + this.windowMs - now
-      console.warn(`[rate_limit] waiting ${waitMs}ms for a slot`)
-      await sleep(Math.max(waitMs, 0))
-      return this.waitForSlot()
-    }
+timeout /t 1 /nobreak >nul
 
-    this.calls.push(now)
-  }
-}
+REM --- Step 3: Start demo server in its own window ---
+echo [2/3] Starting demo server on port 5050...
+start "ServiceFinder - Demo Server" cmd /k "cd /d %BACKEND% && npm run dev:demo"
+
+REM --- Give it a moment to bind the port ---
+timeout /t 4 /nobreak >nul
+
+REM --- Step 4: Start ngrok in its own window ---
+echo [3/3] Starting ngrok tunnel to port 5050...
+start "ServiceFinder - ngrok" cmd /k "ngrok http 127.0.0.1:5050"
+
+echo.
+echo ============================================
+echo   Both services are starting in new windows.
+echo.
+echo   Demo server: http://localhost:5050
+echo   ngrok URL:   check the ngrok window
+echo.
+echo   To stop everything, close both windows
+echo   or run stop-demo.bat
+echo ============================================
+echo.
+pause
 </file>
 
 <file path="backend/src/api/lib/supabase.ts">
@@ -1189,98 +1239,6 @@ export async function replaceInSupabase<T extends Record<string, unknown>>(
 }
 </file>
 
-<file path="backend/src/api/tomtom/client.ts">
-import { request, setRateLimit, requireEnv } from '../lib/http'
-import { replaceInSupabase } from '../lib/supabase'
-import type { TrafficIncidentFeature, TrafficIncidentsResponse } from '../../types/accident.type'
-
-setRateLimit('tomtom', 10, 60_000)
-
-
-const tomtomUrl = requireEnv('TOMTOM_URL', process.env.TOMTOM_URL)
-const tomtomBbox = process.env.TOMTOM_BBOX ?? '18.35,-34.35,19.00,-33.75'
-const incidentFields = '{incidents{type,geometry{type,coordinates},properties{iconCategory,magnitudeOfDelay,events{description,code,iconCategory},from,to,length,delay,roadNumbers,timeValidity}}}'
-
-export function tomtom(key: string, format: 'json' | 'xml' = 'json') {
-  return {
-    get: <T = unknown>(path: string, extraParams: Record<string, string | number> = {}) =>
-      request<T>(tomtomUrl, path, {
-        params: { key, format, ...extraParams }, // double-check this — TomTom's docs use `key`, not `apiKey` like Geoapify does
-        limiter: 'tomtom', 
-      }),
-  }
-}
-
-let trafficImportInProgress = false
-
-export async function importTrafficIncidents(
-  key = requireEnv('TOMTOM_API_KEY', process.env.TOMTOM_API_KEY),
-  path = ''
-) {
-  if (trafficImportInProgress) return { imported: 0, skipped: true }
-  trafficImportInProgress = true
-
-  try {
-    const apiResponse = await tomtom(key).get<TrafficIncidentsResponse>(path, {
-      bbox: tomtomBbox,
-      fields: incidentFields,
-      language: 'en-GB',
-      timeValidityFilter: 'present',
-    })
-
-    if (!isTrafficIncidentsResponse(apiResponse)) {
-      throw new Error('TomTom traffic response did not contain a valid incidents array')
-    }
-
-    const rows = apiResponse.incidents.map((feature) => {
-      const coords = feature.geometry.coordinates
-      const wkt = 'LINESTRING(' + coords.map(([lng, lat]: [number, number]) => `${lng} ${lat}`).join(', ') + ')'
-
-      return {
-        icon_category: feature.properties.iconCategory,
-        magnitude_of_delay: feature.properties.magnitudeOfDelay,
-        from_road: feature.properties.from,
-        to_road: feature.properties.to,
-        length_m: feature.properties.length,
-        delay_seconds: feature.properties.delay,
-        road_numbers: feature.properties.roadNumbers,
-        description: feature.properties.events[0]?.description ?? null,
-        geometry: `SRID=4326;${wkt}`,
-        imported_at: new Date().toISOString(),
-      }
-    })
-
-      await replaceInSupabase('traffic_incidents', rows, { batchSize: 100 })
-
-    return { imported: rows.length, skipped: false }
-  } finally {
-    trafficImportInProgress = false
-  }
-}
-
-function isTrafficIncidentsResponse(value: unknown): value is TrafficIncidentsResponse {
-  if (!value || typeof value !== 'object' || !Array.isArray((value as { incidents?: unknown }).incidents)) {
-    return false
-  }
-
-  return (value as TrafficIncidentsResponse).incidents.every(isTrafficIncidentFeature)
-}
-
-function isTrafficIncidentFeature(value: unknown): value is TrafficIncidentFeature {
-  if (!value || typeof value !== 'object') return false
-
-  const feature = value as Partial<TrafficIncidentFeature>
-  return feature.type === 'Feature'
-    && feature.geometry?.type === 'LineString'
-    && Array.isArray(feature.geometry.coordinates)
-    && feature.geometry.coordinates.every(
-      (coordinate) => Array.isArray(coordinate)
-        && coordinate.length === 2
-        && coordinate.every((value) => typeof value === 'number'),
-    )
-}
-</file>
-
 <file path="backend/src/config/supabase.ts">
 import { createClient } from '@supabase/supabase-js'
 import dotenv from 'dotenv'
@@ -1296,92 +1254,31 @@ if (!supabaseKey) throw new Error('SUPABASE_SERVICE_KEY is not configured')
 export const supabase = createClient(supabaseUrl, supabaseKey)
 </file>
 
-<file path="backend/src/controllers/accidentController.ts">
-import { NextFunction, Request, Response } from 'express'
-import { supabase } from '../config/supabase'
-import { fetchAccidentDetails } from '../models/accident'
+<file path="backend/src/controllers/profileController.ts">
+import type { Request, Response } from 'express'
+import jwt from 'jsonwebtoken'
+import {
+getProfilesDb,
+} from '../models/profile'
 
-//fetch accident details
-export async function getAccidentDetails(req: Request, res: Response, next: NextFunction) {
-    try {
-        const service = await fetchAccidentDetails(req.params.externalId)
+//fetch profiles
+export const getProfilesCon = async (req: Request, res: Response) => {
+try {
+const result = await getProfilesDb()
 
-        if (!service) {
-            res.status(404).json({ message: 'Service not found' })
-            return
-        }
+if (!result.success) {
+return res.status(400).json(result)
+}
 
-        res.json(service)
-    } catch (error) {
-        next(error)
-    }
+return res.status(200).json(result)
+} catch (error: any) {
+return res.status(500).json({ success: false, error: error.message })
+}
 }
 </file>
 
-<file path="backend/src/middleware/errorHandler.ts">
-import { NextFunction, Request, Response } from 'express'
+<file path="backend/src/middleware/requestLogger.ts">
 
-export function notFoundHandler(req: Request, res: Response) {
-	res.status(404).json({
-		error: 'Route not found',
-		path: req.originalUrl,
-		method: req.method,
-	})
-}
-
-export function errorHandler(
-	error: unknown,
-	_req: Request,
-	res: Response,
-	_next: NextFunction,
-) {
-	console.error('REQUEST ERROR:', error)
-	const isUpstreamError = typeof error === 'object' && error !== null &&
-		'message' in error
-	const status = isUpstreamError ? 502 : 500
-
-	if (error instanceof Error) {
-		res.status(status).json({ error: error.message })
-		return
-	}
-
-	if (typeof error === 'object' && error !== null) {
-		const upstreamError = error as {
-			message?: unknown
-			code?: unknown
-			details?: unknown
-		}
-		const message = typeof upstreamError.message === 'string'
-			? upstreamError.message
-			: 'Internal server error'
-		const response: { error: string; code?: string; details?: string } = { error: message }
-
-		if (typeof upstreamError.code === 'string' && upstreamError.code) {
-			response.code = upstreamError.code
-		}
-		if (typeof upstreamError.details === 'string' && upstreamError.details) {
-			response.details = upstreamError.details
-		}
-
-		res.status(status).json(response)
-		return
-	}
-
-	res.status(500).json({ error: 'Internal server error' })
-}
-</file>
-
-<file path="backend/src/routes/accidentRoutes.ts">
-import { Router } from 'express';
-import { getAccidentDetails} from '../controllers/accidentController'
-const router = Router();
-
-router.get
-router.get('/:externalId', getAccidentDetails);
-
-
-
-export default router;
 </file>
 
 <file path="backend/src/routes/authRoutes.ts">
@@ -1396,6 +1293,10 @@ router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);
 
 export default router;
+</file>
+
+<file path="backend/src/utils/apiResponse.ts">
+
 </file>
 
 <file path="frontend/src/components/Auth/LoginForm.tsx">
@@ -1489,71 +1390,58 @@ function LoginForm() {
 export default LoginForm;
 </file>
 
-<file path="frontend/src/hooks/useServices.ts">
-// import { useEffect, useState } from "react";
-// import { getServices } from "../services/api";
-// import type { Service } from "../types/service.types";
-
-// export function useServices() {
-// 	const [services, setServices] = useState<Service[]>([]);
-// 	const [loading, setLoading] = useState(true);
-// 	const [error, setError] = useState("");
-
-// 	useEffect(() => {
-// 		let active = true;
-// 		getServices()
-// 			.then((data) => {
-// 				if (active) setServices(data);
-// 			})
-// 			.catch((reason: unknown) => {
-// 				if (active) setError(reason instanceof Error ? reason.message : "Unable to load services");
-// 			})
-// 			.finally(() => {
-// 				if (active) setLoading(false);
-// 			});
-// 		return () => {
-// 			active = false;
-// 		};
-// 	}, []);
-
-// 	return { services, loading, error };
-// }
-
-
-import { useLiveQuery } from 'dexie-react-hooks';
-import { useEffect, useState } from 'react';
-import { db } from '../db';
-import { refreshServicesIfStale } from '../db/serviceCache';
+<file path="frontend/src/db/serviceCache.ts">
+import { db } from './index';
+import { getServices } from '../services/api';
 import type { Service } from '../types/service.types';
 
-export function useServices() {
-  const services = useLiveQuery(() => db.services.toArray(), [], [] as Service[]);
-  const [error, setError] = useState('');
+const CACHE_TTL_MS = 6 *60 * 60 * 1000;
 
-  useEffect(() => {
-    refreshServicesIfStale().catch((err) => {
-      setError(err instanceof Error ? err.message : 'Unable to refresh services.');
+// Debug log we can surface on screen
+const debugLog: string[] = [];
+export function getCacheDebugLog() { return debugLog.join('\n'); }
+function log(line: string) {
+  console.log('[cache]', line);
+  debugLog.push(line);
+}
+
+async function isCacheStale(): Promise<boolean> {
+  const row = await db.meta.get('services_last_synced');
+  if (!row) { log('cache: empty (no last_synced)'); return true; }
+  const age = Date.now() - Number(row.value);
+  log(`cache: age ${Math.round(age / 1000)}s`);
+  return age > CACHE_TTL_MS;
+}
+
+export async function refreshServicesIfStale(): Promise<boolean> {
+  log('refreshServicesIfStale called');
+  try {
+    if (!(await isCacheStale())) { log('cache fresh, skipping'); return false; }
+
+    log('fetching from backend...');
+    const rows = await getServices({ limit: 500 });
+    log(`got ${rows.length} rows`);
+    log(`first row name: ${rows[0]?.name ?? '(none)'}`);
+    log(`first row location type: ${typeof rows[0]?.location}`);
+    log(`first row location value: ${String(rows[0]?.location).slice(0, 50)}`);
+
+    await db.transaction('rw', db.services, db.meta, async () => {
+      await db.services.clear();
+      await db.services.bulkPut(rows);
+      await db.meta.put({ key: 'services_last_synced', value: String(Date.now()) });
     });
-  }, []);
-
-  return {
-    services: services ?? [],
-    loading: services === undefined,
-    error,
-  };
-}
-</file>
-
-<file path="frontend/src/pages/Dashboard.tsx">
-function Dashboard() {
-	return (
-		<main className="dashboard-placeholder">
-			<h1>This is dashboard</h1>
-		</main>
-	);
+    log(`wrote ${rows.length} rows to dexie`);
+    return true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`ERROR: ${msg}`);
+    return false;
+  }
 }
 
-export default Dashboard;
+export async function getCachedServices(): Promise<Service[]> {
+  return db.services.toArray();
+}
 </file>
 
 <file path="frontend/src/pages/Login.tsx">
@@ -1613,6 +1501,24 @@ export interface Service {
 }
 </file>
 
+<file path="frontend/src/types/traffic.types.ts">
+export type TrafficCoordinate = [longitude: number, latitude: number]
+
+export interface TrafficIncident {
+  id: string
+  icon_category: number | null
+  magnitude_of_delay: number | null
+  from_road: string | null
+  to_road: string | null
+  length_m: number | null
+  delay_seconds: number | null
+  road_numbers: string[] | null
+  description: string | null
+  geometry: unknown
+  imported_at: string
+}
+</file>
+
 <file path="frontend/index.html">
 <!DOCTYPE html>
 <html lang="en">
@@ -1632,110 +1538,17 @@ export interface Service {
 </html>
 </file>
 
-<file path="frontend/tsconfig.tsbuildinfo">
-{
-    "root": [
-        "./src/app.tsx",
-        "./src/main.tsx",
-        "./src/vite-env.d.ts",
-        "./src/components/adminpanel/adminpanel.tsx",
-        "./src/components/auth/authlayout.tsx",
-        "./src/components/auth/loginform.tsx",
-        "./src/components/auth/signupform.tsx",
-        "./src/components/dashboard/dashboard.tsx",
-        "./src/components/map/mapmarker.tsx",
-        "./src/components/map/mapview.tsx",
-        "./src/components/searchbar/searchbar.tsx",
-        "./src/components/servicecard/servicecard.tsx",
-        "./src/components/common/button.tsx",
-        "./src/components/common/loader.tsx",
-        "./src/context/authcontext.tsx",
-        "./src/hooks/useauth.ts",
-        "./src/hooks/useservices.ts",
-        "./src/pages/admin.tsx",
-        "./src/pages/dashboard.tsx",
-        "./src/pages/forgotpassword.tsx",
-        "./src/pages/home.tsx",
-        "./src/pages/login.tsx",
-        "./src/pages/signup.tsx",
-        "./src/services/api.ts",
-        "./src/services/authservice.ts",
-        "./src/services/mapsservice.ts",
-        "./src/types/service.types.ts",
-        "./src/types/user.types.ts",
-        "./src/utils/constants.ts",
-        "./src/utils/formatters.ts"
-    ],
-    "version": "5.9.3"
-}
-{
-    "root": [
-        "./src/app.tsx",
-        "./src/main.tsx",
-        "./src/components/adminpanel/adminpanel.tsx",
-        "./src/components/auth/loginform.tsx",
-        "./src/components/auth/signupform.tsx",
-        "./src/components/dashboard/dashboard.tsx",
-        "./src/components/map/mapmarker.tsx",
-        "./src/components/map/mapview.tsx",
-        "./src/components/searchbar/searchbar.tsx",
-        "./src/components/servicecard/servicecard.tsx",
-        "./src/components/common/button.tsx",
-        "./src/components/common/loader.tsx",
-        "./src/context/authcontext.tsx",
-        "./src/hooks/useauth.ts",
-        "./src/hooks/useservices.ts",
-        "./src/pages/admin.tsx",
-        "./src/pages/dashboard.tsx",
-        "./src/pages/home.tsx",
-        "./src/pages/login.tsx",
-        "./src/services/api.ts",
-        "./src/services/authservice.ts",
-        "./src/services/mapsservice.ts",
-        "./src/types/service.types.ts",
-        "./src/types/user.types.ts",
-        "./src/utils/constants.ts",
-        "./src/utils/formatters.ts"
-    ],
-    "version": "5.9.3"
-}
-</file>
+<file path="frontend/vite.config.ts">
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
 
-<file path=".gitignore">
-# Dependencies
-node_modules/
-frontend/node_modules/
-backend/node_modules/
-
-# Env files
-.env
-.env.local
-frontend/.env
-backend/.env
-
-# Build output
-frontend/dist/
-backend/dist/
-backend/build/
-
-# Logs
-*.log
-npm-debug.log*
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Editor
-.vscode/
-.idea/
-
-# others
-.fallow/
-.repomix/
-
-frontend/package-lock.json
-backend/package-lock.json
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    host: true,
+    allowedHosts: ['.ngrok-free.dev', '.ngrok-free.app', '.ngrok.io'],
+  },
+});
 </file>
 
 <file path="package.json">
@@ -1813,6 +1626,33 @@ The service import can be tested with `POST /api/admin/import/services` and the 
 4. Run backend: `npm run dev` (from `backend/` — runs TypeScript directly via ts-node/nodemon)
 5. Run frontend: `npm run dev` (from `frontend/`)
 6. To build the backend for production: `npm run build` (from `backend/`), then `npm start`
+</file>
+
+<file path="backend/src/api/lib/rate_limit.ts">
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+export class RateLimiter{
+    private calls :number[]=[ ]
+
+  constructor(
+    private readonly maxCalls: number,
+    private readonly windowMs: number
+  ) {}
+
+  async waitForSlot(): Promise<void> {
+    const now = Date.now()
+    this.calls = this.calls.filter((t) => now - t < this.windowMs)
+
+    if (this.calls.length >= this.maxCalls) {
+      const waitMs = this.calls[0] + this.windowMs - now
+      console.warn(`[rate_limit] waiting ${waitMs}ms for a slot`)
+      await sleep(Math.max(waitMs, 0))
+      return this.waitForSlot()
+    }
+
+    this.calls.push(now)
+  }
+}
 </file>
 
 <file path="backend/src/controllers/authController.ts">
@@ -1948,6 +1788,514 @@ export async function resetPassword(req: Request, res: Response) {
 }
 </file>
 
+<file path="backend/src/services/authService.ts">
+
+</file>
+
+<file path="backend/tsconfig.json">
+// {
+//   "compilerOptions": {
+//     "target": "ES2020",
+//     "module": "CommonJS",
+//     "moduleResolution": "node",
+//     "outDir": "dist",
+//     "rootDir": "src",
+//     "strict": true,
+//     "esModuleInterop": true,
+//     "skipLibCheck": true,
+//     "forceConsistentCasingInFileNames": true,
+//     "resolveJsonModule": true
+//   },
+//   "include": ["src"]
+// }
+{
+  "compilerOptions": {
+  "target": "ES2020",
+  "module": "NodeNext",
+  "moduleResolution": "NodeNext",
+  "rootDir": "src",
+  "outDir": "dist",
+  "strict": true,
+  "esModuleInterop": true,
+  "skipLibCheck": true,
+  "sourceMap": true
+},
+  "include": ["./**/*"],
+  "exclude": ["node_modules", "dist"]
+}
+</file>
+
+<file path="frontend/src/hooks/useServices.ts">
+// import { useEffect, useState } from "react";
+// import { getServices } from "../services/api";
+// import type { Service } from "../types/service.types";
+
+// export function useServices() {
+// 	const [services, setServices] = useState<Service[]>([]);
+// 	const [loading, setLoading] = useState(true);
+// 	const [error, setError] = useState("");
+
+// 	useEffect(() => {
+// 		let active = true;
+// 		getServices()
+// 			.then((data) => {
+// 				if (active) setServices(data);
+// 			})
+// 			.catch((reason: unknown) => {
+// 				if (active) setError(reason instanceof Error ? reason.message : "Unable to load services");
+// 			})
+// 			.finally(() => {
+// 				if (active) setLoading(false);
+// 			});
+// 		return () => {
+// 			active = false;
+// 		};
+// 	}, []);
+
+// 	return { services, loading, error };
+// }
+
+
+import { useLiveQuery } from 'dexie-react-hooks';
+import { useEffect, useState } from 'react';
+import { db } from '../db';
+import { refreshServicesIfStale } from '../db/serviceCache';
+import type { Service } from '../types/service.types';
+
+export function useServices() {
+  const services = useLiveQuery(() => db.services.toArray(), [], [] as Service[]);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    refreshServicesIfStale().catch((err) => {
+      setError(err instanceof Error ? err.message : 'Unable to refresh services.');
+    });
+  }, []);
+
+  return {
+    services: services ?? [],
+    loading: services === undefined,
+    error,
+  };
+}
+</file>
+
+<file path="frontend/src/hooks/useTrafficIncidents.ts">
+import { useEffect, useState } from "react";
+import { getTrafficIncidents } from "../services/api";
+import type { TrafficIncident } from "../types/traffic.types";
+
+export function useTrafficIncidents() {
+	const [incidents, setIncidents] = useState<TrafficIncident[]>([]);
+	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState("");
+
+	useEffect(() => {
+		let active = true;
+		getTrafficIncidents()
+			.then((data) => {
+				if (active) setIncidents(data);
+			})
+			.catch((reason: unknown) => {
+				if (active) setError(reason instanceof Error ? reason.message : "Unable to load traffic incidents");
+			})
+			.finally(() => {
+				if (active) setLoading(false);
+			});
+		return () => {
+			active = false;
+		};
+	}, []);
+
+	return { incidents, loading, error };
+}
+</file>
+
+<file path="backend/src/api/tomtom/client.ts">
+import { request, setRateLimit, requireEnv } from '../lib/http'
+import { replaceInSupabase, upsertToSupabase } from '../lib/supabase'
+import { supabase } from '../../config/supabase'
+import { ensureServiceCategories } from '../../services/categoryService'
+import type { TrafficIncidentFeature, TrafficIncidentsResponse } from '../../types/accident.type'
+import { formatBbox, getNextSouthAfricaArea, getNextSouthAfricaTrafficArea } from '../../config/southAfricaAreas'
+
+setRateLimit('tomtom', 10, 60_000)
+
+const tomtomUrl = requireEnv('TOMTOM_URL', process.env.TOMTOM_URL)
+const tomtomSearchUrl = process.env.TOMTOM_SEARCH_URL ?? 'https://api.tomtom.com/search/2'
+const incidentFields = '{incidents{type,geometry{type,coordinates},properties{iconCategory,magnitudeOfDelay,events{description,code,iconCategory},from,to,length,delay,roadNumbers,timeValidity}}}'
+
+export function tomtom(key: string, format: 'json' | 'xml' = 'json') {
+  return {
+    get: <T = unknown>(path: string, extraParams: Record<string, string | number> = {}) =>
+      request<T>(tomtomUrl, path, {
+        params: { key, format, ...extraParams },
+        limiter: 'tomtom',
+      }),
+  }
+}
+
+let trafficImportInProgress = false
+
+export async function importTrafficIncidents(
+  key = requireEnv('TOMTOM_API_KEY', process.env.TOMTOM_API_KEY),
+  path = ''
+) {
+  if (trafficImportInProgress) return { imported: 0, skipped: true }
+  trafficImportInProgress = true
+
+  try {
+    const area = getNextSouthAfricaTrafficArea()
+    const apiResponse = await tomtom(key).get<TrafficIncidentsResponse>(path, {
+      bbox: formatBbox(area),
+      fields: incidentFields,
+      language: 'en-GB',
+      timeValidityFilter: 'present',
+    })
+
+    if (!isTrafficIncidentsResponse(apiResponse)) {
+      throw new Error('TomTom traffic response did not contain a valid incidents array')
+    }
+
+    const rows = apiResponse.incidents.map((feature) => {
+      const coords = feature.geometry.coordinates
+      const wkt = 'LINESTRING(' + coords.map(([lng, lat]: [number, number]) => `${lng} ${lat}`).join(', ') + ')'
+
+      return {
+        icon_category: feature.properties.iconCategory,
+        magnitude_of_delay: feature.properties.magnitudeOfDelay,
+        from_road: feature.properties.from,
+        to_road: feature.properties.to,
+        length_m: feature.properties.length,
+        delay_seconds: feature.properties.delay,
+        road_numbers: feature.properties.roadNumbers,
+        description: feature.properties.events[0]?.description ?? null,
+        geometry: `SRID=4326;${wkt}`,
+        imported_at: new Date().toISOString(),
+      }
+    })
+
+    await replaceInSupabase('traffic_incidents', rows, { batchSize: 100 })
+
+    return { imported: rows.length, area: area.name, skipped: false }
+  } finally {
+    trafficImportInProgress = false
+  }
+}
+
+function isTrafficIncidentsResponse(value: unknown): value is TrafficIncidentsResponse {
+  if (!value || typeof value !== 'object' || !Array.isArray((value as { incidents?: unknown }).incidents)) {
+    return false
+  }
+  return (value as TrafficIncidentsResponse).incidents.every(isTrafficIncidentFeature)
+}
+
+function isTrafficIncidentFeature(value: unknown): value is TrafficIncidentFeature {
+  if (!value || typeof value !== 'object') return false
+
+  const feature = value as Partial<TrafficIncidentFeature>
+  return feature.type === 'Feature'
+    && feature.geometry?.type === 'LineString'
+    && Array.isArray(feature.geometry.coordinates)
+    && feature.geometry.coordinates.every(
+      (coordinate) => Array.isArray(coordinate)
+        && coordinate.length === 2
+        && coordinate.every((value) => typeof value === 'number'),
+    )
+}
+
+type TomTomServiceResult = {
+  id: string
+  poi?: {
+    name?: string
+    phone?: string
+    url?: string
+    categories?: string[]
+  }
+  address?: {
+    freeformAddress?: string
+  }
+  position?: {
+    lat?: number
+    lon?: number
+  }
+}
+
+type ExistingService = {
+  id: string
+  external_id: string | null
+  name: string
+  type: string | null
+  category_id: string | null
+  formatted_address: string | null
+  location: string | null
+  phone: string | null
+  website: string | null
+  opening_hours: string | null
+  wheelchair: string | null
+}
+
+const serviceSearchCategories = (process.env.TOMTOM_SERVICE_CATEGORIES ?? 'school,hospital,clinic,pharmacy,dentist,library,police station,fire station,shelter')
+  .split(',')
+  .map((category) => category.trim())
+  .filter(Boolean)
+
+async function searchTomTomServices(key: string, category: string, latitude: number, longitude: number) {
+  const pageSize = 100
+  const maxPages = Math.max(1, Number(process.env.TOMTOM_SERVICE_MAX_PAGES ?? 3))
+  const results: TomTomServiceResult[] = []
+
+  for (let page = 0; page < maxPages; page++) {
+    const response = await request<{ results?: TomTomServiceResult[]; summary?: { totalResults?: number } }>(
+      tomtomSearchUrl,
+      `/categorySearch/${encodeURIComponent(category)}.json`,
+      {
+        params: {
+          key,
+          countrySet: 'ZA',
+          lat: latitude,
+          lon: longitude,
+          radius: Number(process.env.TOMTOM_SERVICE_RADIUS ?? 10000),
+          limit: pageSize,
+          ofs: page * pageSize,
+        },
+        limiter: 'tomtom',
+      },
+    )
+
+    const pageResults = response.results ?? []
+    results.push(...pageResults)
+    if (pageResults.length < pageSize || results.length >= (response.summary?.totalResults ?? 0)) break
+  }
+
+  return results
+}
+
+function normalizeName(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function parsePoint(location: string | null): [number, number] | null {
+  if (!location) return null
+  const wkt = location.match(/POINT\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)/i)
+  if (wkt) return [Number(wkt[1]), Number(wkt[2])]
+
+  if (!/^[0-9a-f]+$/i.test(location) || location.length < 34) return null
+  const bytes = new Uint8Array(location.match(/.{2}/g)!.map((pair) => parseInt(pair, 16)))
+  const littleEndian = bytes[0] === 1
+  const view = new DataView(bytes.buffer)
+  const geometryType = view.getUint32(1, littleEndian)
+  const coordinateOffset = 5 + (geometryType & 0x20000000 ? 4 : 0)
+  if ((geometryType & 0xff) !== 1 || bytes.length < coordinateOffset + 16) return null
+  return [
+    view.getFloat64(coordinateOffset, littleEndian),
+    view.getFloat64(coordinateOffset + 8, littleEndian),
+  ]
+}
+
+function distanceInMeters(first: [number, number], second: [number, number]) {
+  const latitude = ((first[1] + second[1]) / 2) * Math.PI / 180
+  const longitudeMeters = 111_320 * Math.cos(latitude)
+  return Math.hypot((first[0] - second[0]) * longitudeMeters, (first[1] - second[1]) * 110_574)
+}
+
+function mapTomTomService(result: TomTomServiceResult, category: string, categoryId: string | null) {
+  const name = result.poi?.name?.trim()
+  const latitude = result.position?.lat
+  const longitude = result.position?.lon
+  if (!result.id || !name || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return null
+
+  return {
+    external_id: `tomtom:${result.id}`,
+    name,
+    type: category,
+    category_id: categoryId,
+    formatted_address: result.address?.freeformAddress ?? null,
+    location: `SRID=4326;POINT(${longitude} ${latitude})`,
+    phone: result.poi?.phone ?? null,
+    website: result.poi?.url ? (result.poi.url.startsWith('http') ? result.poi.url : `https://${result.poi.url}`) : null,
+    sourcename: 'tomtom',
+    imported_at: new Date().toISOString(),
+  }
+}
+
+function enrichableFields(existing: ExistingService, candidate: ReturnType<typeof mapTomTomService>) {
+  if (!candidate) return {}
+  const updates: Record<string, string> = {}
+  for (const field of ['formatted_address', 'phone', 'website'] as const) {
+    if (!existing[field] && candidate[field]) updates[field] = candidate[field]
+  }
+  if (!existing.category_id && candidate.category_id) updates.category_id = candidate.category_id
+  if (!existing.type && candidate.type) updates.type = candidate.type
+  return updates
+}
+
+let serviceImportInProgress = false
+
+export async function importTomTomServices(
+  key = requireEnv('TOMTOM_API_KEY', process.env.TOMTOM_API_KEY),
+) {
+  if (serviceImportInProgress) return { fetched: 0, inserted: 0, enriched: 0, skipped: true }
+  serviceImportInProgress = true
+
+  try {
+    const area = getNextSouthAfricaArea('tomtom-services')
+    const categories = await ensureServiceCategories()
+    const results: Array<{ result: TomTomServiceResult; category: string }> = []
+    for (const category of serviceSearchCategories) {
+      const [latitude, longitude] = area.center
+      const categoryResults = await searchTomTomServices(key, category, latitude, longitude)
+      results.push(...categoryResults.map((result) => ({ result, category })))
+    }
+
+    const unique = Array.from(new Map(results.map((entry) => [entry.result.id, entry])).values())
+    const { data: existingRows, error } = await supabase
+      .from('services')
+      .select('id,external_id,name,type,category_id,formatted_address,location,phone,website,opening_hours,wheelchair')
+      .limit(10_000)
+    if (error) throw error
+
+    const existing = (existingRows ?? []) as ExistingService[]
+    const inserts: NonNullable<ReturnType<typeof mapTomTomService>>[] = []
+    let enriched = 0
+    for (const { result, category } of unique) {
+      const categoryDefinition = getTomTomCategory(category, categories)
+      const candidate = mapTomTomService(result, categoryDefinition.name, categoryDefinition.id || null)
+      if (!candidate) continue
+      const coordinates = parsePoint(candidate.location.replace(/^SRID=4326;/, ''))
+      const match = existing.find((service) =>
+        service.external_id === candidate.external_id ||
+        (normalizeName(service.name) === normalizeName(candidate.name) && coordinates && parsePoint(service.location) && distanceInMeters(coordinates, parsePoint(service.location)!) <= 150),
+      )
+      if (!match) {
+        inserts.push(candidate)
+        continue
+      }
+      const updates = enrichableFields(match, candidate)
+      if (Object.keys(updates).length > 0) {
+        const { error: updateError } = await supabase.from('services').update(updates).eq('id', match.id)
+        if (updateError) throw updateError
+        enriched++
+      }
+    }
+
+    if (inserts.length > 0) {
+      await upsertToSupabase('services', inserts, { batchSize: 100, onConflict: 'external_id' })
+    }
+    return { fetched: unique.length, inserted: inserts.length, enriched, area: area.name, skipped: false }
+  } finally {
+    serviceImportInProgress = false
+  }
+}
+
+function getTomTomCategory(category: string, categories: Map<string, { id: string; name: string }>) {
+  const normalized = category.toLowerCase().trim()
+  const aliases: Record<string, string> = {
+    'government office': 'public-service-office',
+    'government offices': 'public-service-office',
+    police: 'police-station',
+    'police station': 'police-station',
+    'fire station': 'fire-station',
+    'fire stations': 'fire-station',
+    'social shelter': 'shelter',
+    'primary school': 'school',
+    'high school': 'school',
+  }
+  const slug = aliases[normalized] ?? normalized.replace(/\s+/g, '-')
+  return categories.get(slug) ?? { id: '', name: category.trim() || 'Public service office' }
+}
+</file>
+
+<file path="backend/src/controllers/accidentController.ts">
+import { NextFunction, Request, Response } from 'express'
+import { supabase } from '../config/supabase'
+import { fetchAccidentDetails } from '../models/accident'
+
+export async function getTrafficIncidents(_req: Request, res: Response, next: NextFunction) {
+    try {
+        const { data, error } = await supabase
+            .from('traffic_incidents')
+            .select('id,icon_category,magnitude_of_delay,from_road,to_road,length_m,delay_seconds,road_numbers,description,geometry,imported_at')
+            .order('imported_at', { ascending: false })
+
+        if (error) throw error
+
+        res.json(data ?? [])
+    } catch (error) {
+        next(error)
+    }
+}
+
+//fetch accident details
+export async function getAccidentDetails(req: Request, res: Response, next: NextFunction) {
+    try {
+        const service = await fetchAccidentDetails(req.params.externalId)
+
+        if (!service) {
+            res.status(404).json({ message: 'Service not found' })
+            return
+        }
+
+        res.json(service)
+    } catch (error) {
+        next(error)
+    }
+}
+</file>
+
+<file path="backend/src/middleware/errorHandler.ts">
+import { NextFunction, Request, Response } from 'express'
+
+export function notFoundHandler(req: Request, res: Response) {
+	res.status(404).json({
+		error: 'Route not found',
+		path: req.originalUrl,
+		method: req.method,
+	})
+}
+
+export function errorHandler(
+	error: unknown,
+	_req: Request,
+	res: Response,
+	_next: NextFunction,
+) {
+	console.error('REQUEST ERROR:', error)
+	const isUpstreamError = typeof error === 'object' && error !== null &&
+		'message' in error
+	const status = isUpstreamError ? 502 : 500
+
+	if (error instanceof Error) {
+		res.status(status).json({ error: error.message })
+		return
+	}
+
+	if (typeof error === 'object' && error !== null) {
+		const upstreamError = error as {
+			message?: unknown
+			code?: unknown
+			details?: unknown
+		}
+		const message = typeof upstreamError.message === 'string'
+			? upstreamError.message
+			: 'Internal server error'
+		const response: { error: string; code?: string; details?: string } = { error: message }
+
+		if (typeof upstreamError.code === 'string' && upstreamError.code) {
+			response.code = upstreamError.code
+		}
+		if (typeof upstreamError.details === 'string' && upstreamError.details) {
+			response.details = upstreamError.details
+		}
+
+		res.status(status).json(response)
+		return
+	}
+
+	res.status(500).json({ error: 'Internal server error' })
+}
+</file>
+
 <file path="backend/src/routes/adminRoutes.ts">
 import { Router } from 'express'
 import { importServices } from '../api/geoapify/client'
@@ -1990,57 +2338,6 @@ router.post('/sync/service-categories', requireAdminImportToken, async (_req, re
 export default router
 </file>
 
-<file path="backend/src/server.ts">
-import 'dotenv/config';
-import express from 'express';
-import cors from 'cors';
-
-import serviceRoutes from './routes/serviceRoutes';
-import authRoutes from './routes/authRoutes';
-import adminRoutes from './routes/adminRoutes';
-import { importServices } from './api/geoapify/client';
-import { errorHandler, notFoundHandler } from './middleware/errorHandler';
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-app.use('/api/services', serviceRoutes);
-app.use('/api/auth', authRoutes);
-app.use('/api/admin', adminRoutes);
-app.use(notFoundHandler);
-app.use(errorHandler);
-
-const importIntervalMs = Number(process.env.IMPORT_INTERVAL_MS || 0);
-if (process.env.AUTO_IMPORT_SERVICES === 'true') {
-	importServices().catch((error) => console.error('[import] initial import failed', error));
-}
-
-if (importIntervalMs > 0) {
-	setInterval(() => {
-		importServices().catch((error) => console.error('[import] failed', error));
-	}, importIntervalMs);
-}
-
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-</file>
-
-<file path="backend/.env.example">
-PORT=5000
-SUPABASE_URL=your_supabase_url
-SUPABASE_SERVICE_KEY=your_supabase_service_key
-MAPS_API_KEY=your_maps_api_key_here
-MAPS_DAILY_LIMIT=1000
-FIREBASE_PROJECT_ID=
-FIREBASE_CLIENT_EMAIL=
-FIREBASE_PRIVATE_KEY=
-GEOAPIFY_API_KEY=your_geoapify_api_key_here
-ADMIN_IMPORT_TOKEN=use_a_long_random_value
-# Optional. Leave blank to disable automatic imports.
-IMPORT_INTERVAL_MS=0
-</file>
-
 <file path="backend/package.json">
 {
   "name": "service-finder-backend",
@@ -2049,6 +2346,7 @@ IMPORT_INTERVAL_MS=0
   "main": "dist/server.js",
   "scripts": {
     "dev": "nodemon --exec ts-node src/server.ts",
+    "dev:demo": "nodemon --exec ts-node src/server.demo.ts",
     "build": "tsc",
     "start": "node dist/server.js"
   },
@@ -2072,109 +2370,616 @@ IMPORT_INTERVAL_MS=0
 }
 </file>
 
-<file path="backend/tsconfig.json">
-// {
-//   "compilerOptions": {
-//     "target": "ES2020",
-//     "module": "CommonJS",
-//     "moduleResolution": "node",
-//     "outDir": "dist",
-//     "rootDir": "src",
-//     "strict": true,
-//     "esModuleInterop": true,
-//     "skipLibCheck": true,
-//     "forceConsistentCasingInFileNames": true,
-//     "resolveJsonModule": true
-//   },
-//   "include": ["src"]
-// }
-{
-  "compilerOptions": {
-  "target": "ES2020",
-  "module": "NodeNext",
-  "moduleResolution": "NodeNext",
-  "rootDir": "src",
-  "outDir": "dist",
-  "strict": true,
-  "esModuleInterop": true,
-  "skipLibCheck": true,
-  "sourceMap": true
-},
-  "include": ["./**/*"],
-  "exclude": ["node_modules", "dist"]
-}
-</file>
+<file path="frontend/src/pages/Dashboard.tsx">
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { BookOpen, Bookmark, Bus, Clock3, Flame, GraduationCap, Heart, Hospital, House, Landmark, Library, LocateFixed, MapPinned, Minus, Navigation, Phone, Pill, Plus, Search, Shield, ShoppingBag, Smile, Stethoscope, X } from 'lucide-react';
 
-<file path="frontend/src/services/api.ts">
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+declare const L: any;
+type Category = 'Clinics' | 'Libraries' | 'Shelters' | 'Hospitals' | 'Police Stations' | 'Pharmacies' | 'Dentists' | 'SPCA' | 'Fire Stations' | 'Home Affairs' | 'Malls' | 'Transport' | 'Schools / Universities';
+type Place = { name: string; category: Category; area: string; lat: number; lng: number };
+const categories: { name: Category; symbol: string; color: string }[] = [
+  { name: 'Clinics', symbol: '+', color: '#b94b3c' },
+  { name: 'Libraries', symbol: '▮', color: '#4f876f' },
+  { name: 'Shelters', symbol: '⌂', color: '#cb8c38' },
+  { name: 'Hospitals', symbol: '+', color: '#3b77a2' },
+  { name: 'Police Stations', symbol: '●', color: '#375f93' },
+  { name: 'Pharmacies', symbol: '●', color: '#81528d' },
+  { name: 'Dentists', symbol: '●', color: '#77909c' },
+  { name: 'SPCA', symbol: '♥', color: '#815c54' },
+  { name: 'Fire Stations', symbol: '♦', color: '#bd6240' },
+  { name: 'Home Affairs', symbol: '▦', color: '#75664b' },
+  { name: 'Malls', symbol: '●', color: '#a45b83' },
+  { name: 'Transport', symbol: '▰', color: '#847337' },
+  { name: 'Schools / Universities', symbol: '◆', color: '#43858a' },
+];
+const places: Place[] = [
+  ['Cape Town Civic Centre', 'Home Affairs', 'Cape Town', -33.925, 18.424],
+  ['Groote Schuur Hospital', 'Hospitals', 'Observatory', -33.941, 18.465],
+  ['Sea Point Police Station', 'Police Stations', 'Sea Point', -33.918, 18.386],
+  ['Cape Town Central Library', 'Libraries', 'CBD', -33.925, 18.423],
+  ['Woodstock Clinic', 'Clinics', 'Woodstock', -33.927, 18.448],
+  ['Mowbray Maternity Hospital', 'Hospitals', 'Mowbray', -33.948, 18.475],
+  ['Rondebosch Library', 'Libraries', 'Rondebosch', -33.961, 18.476],
+  ['Khayelitsha Mall', 'Malls', 'Khayelitsha', -34.037, 18.678],
+  ['Mitchells Plain Clinic', 'Clinics', 'Mitchells Plain', -34.048, 18.617],
+  ['Bellville Police Station', 'Police Stations', 'Bellville', -33.900, 18.628],
+  ['Tygerberg Hospital', 'Hospitals', 'Parow', -33.908, 18.596],
+  ['Milnerton Library', 'Libraries', 'Milnerton', -33.879, 18.496],
+  ['Hout Bay Fire Station', 'Fire Stations', 'Hout Bay', -34.044, 18.348],
+  ['Wynberg SPCA', 'SPCA', 'Wynberg', -34.003, 18.468],
+  ['Claremont Transport Hub', 'Transport', 'Claremont', -33.981, 18.465],
+  ['UCT', 'Schools / Universities', 'Rondebosch', -33.957, 18.461],
+  ['Table View Shelter', 'Shelters', 'Table View', -33.824, 18.488],
+  ['Kloof Street Pharmacy', 'Pharmacies', 'Gardens', -33.932, 18.410],
+].map(([name, category, area, lat, lng]) => ({
+  name: name as string,
+  category: category as Category,
+  area: area as string,
+  lat: lat as number,
+  lng: lng as number,
+}));
 
-type ApiError = { error?: string };
-
-async function request<T>(path: string, options: RequestInit): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      ...options,
-      headers: { 'Content-Type': 'application/json', ...options.headers },
-    });
-  } catch {
-    throw new Error('Unable to reach the authentication server. Start the backend and check its Supabase configuration.');
+const categoryIcon = (category: Category, size = 14) => {
+  const props = { size, strokeWidth: 2.2 };
+  switch (category) {
+    case 'Clinics': return <Stethoscope {...props} />;
+    case 'Libraries': return <Library {...props} />;
+    case 'Shelters': return <House {...props} />;
+    case 'Hospitals': return <Hospital {...props} />;
+    case 'Police Stations': return <Shield {...props} />;
+    case 'Pharmacies': return <Pill {...props} />;
+    case 'Dentists': return <Smile {...props} />;
+    case 'SPCA': return <Heart {...props} />;
+    case 'Fire Stations': return <Flame {...props} />;
+    case 'Home Affairs': return <Landmark {...props} />;
+    case 'Malls': return <ShoppingBag {...props} />;
+    case 'Transport': return <Bus {...props} />;
+    case 'Schools / Universities': return <GraduationCap {...props} />;
   }
-  const payload = await response.json() as T & ApiError;
-  if (!response.ok) throw new Error(payload.error || 'Something went wrong.');
-  return payload;
-}
-
-export type AuthResponse = {
-  user: { id: string; email?: string };
-  session?: { access_token: string; refresh_token: string };
-  needsEmailConfirmation?: boolean;
 };
 
-export function loginRequest(email: string, password: string) {
-  return request<AuthResponse>('/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ email, password }),
-  });
+const distanceKm = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((a.lat * Math.PI) / 180) *
+      Math.cos((b.lat * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+};
+const formatDistance = (km: number) => (km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`);
+
+function LeafletMap({
+  places,
+  selected,
+  onSelect,
+  mapRef,
+  userLocation,
+  routeTarget,
+}: {
+  places: Place[];
+  selected: Place | null;
+  onSelect: (place: Place) => void;
+  mapRef: React.MutableRefObject<any>;
+  userLocation: { lat: number; lng: number; accuracy: number } | null;
+  routeTarget: Place | null;
+}) {
+  const root = useRef<HTMLDivElement>(null);
+  const layer = useRef<any>(null);
+  const userMarker = useRef<any>(null);
+  const accuracyCircle = useRef<any>(null);
+  const routeLine = useRef<any>(null);
+  const lastRouteKey = useRef<string>('');
+
+  useEffect(() => {
+    if (!root.current || !L) return;
+    const map = L.map(root.current, { zoomControl: false, attributionControl: true }).setView([-33.96, 18.5], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors',
+    }).addTo(map);
+    mapRef.current = map;
+    layer.current = L.layerGroup().addTo(map);
+    return () => map.remove();
+  }, [mapRef]);
+
+  useEffect(() => {
+    if (!layer.current) return;
+    layer.current.clearLayers();
+    places.forEach((place) => {
+      const item = categories.find((c) => c.name === place.category)!;
+      const icon = L.divIcon({
+        className: 'cape-marker-wrap',
+        html: `<div class="cape-marker" style="--marker:${item.color}"><span>${renderToStaticMarkup(categoryIcon(place.category, 14))}</span></div>`,
+        iconSize: [34, 42],
+        iconAnchor: [17, 42],
+      });
+      const marker = L.marker([place.lat, place.lng], { icon }).addTo(layer.current);
+      marker.bindTooltip(`<strong>${place.name}</strong><br>${place.category}`, { direction: 'top', offset: [0, -38] });
+      marker.on('click', () => onSelect(place));
+    });
+  }, [places, selected, onSelect]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !L) return;
+    if (!userLocation) {
+      if (userMarker.current) {
+        map.removeLayer(userMarker.current);
+        userMarker.current = null;
+      }
+      if (accuracyCircle.current) {
+        map.removeLayer(accuracyCircle.current);
+        accuracyCircle.current = null;
+      }
+      return;
+    }
+    const { lat, lng, accuracy } = userLocation;
+    if (!userMarker.current) {
+      const icon = L.divIcon({
+        className: 'user-location-wrap',
+        html: '<span class="user-location-pulse"></span><span class="user-location-dot"></span>',
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+      });
+      userMarker.current = L.marker([lat, lng], { icon, zIndexOffset: 1000 }).addTo(map);
+      accuracyCircle.current = L.circle([lat, lng], {
+        radius: accuracy,
+        color: '#22c55e',
+        weight: 1,
+        fillColor: '#22c55e',
+        fillOpacity: 0.12,
+      }).addTo(map);
+    } else {
+      userMarker.current.setLatLng([lat, lng]);
+      accuracyCircle.current.setLatLng([lat, lng]);
+      accuracyCircle.current.setRadius(accuracy);
+    }
+  }, [userLocation, mapRef]);
+
+  // Fetch real road directions (OSRM) and draw the route along actual roads
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !L) return;
+
+    if (!userLocation || !routeTarget) {
+      if (routeLine.current) {
+        map.removeLayer(routeLine.current);
+        routeLine.current = null;
+      }
+      lastRouteKey.current = '';
+      return;
+    }
+
+    // Only re-fetch when destination changes or user has moved ~80m+
+    const key = `${routeTarget.lat.toFixed(4)},${routeTarget.lng.toFixed(4)}|${userLocation.lat.toFixed(3)},${userLocation.lng.toFixed(3)}`;
+    if (key === lastRouteKey.current && routeLine.current) return;
+    lastRouteKey.current = key;
+
+    const controller = new AbortController();
+    const from = `${userLocation.lng},${userLocation.lat}`;
+    const to = `${routeTarget.lng},${routeTarget.lat}`;
+    // Public OSRM demo — driving profile with full road geometry
+    const url = `https://router.project-osrm.org/route/v1/driving/${from};${to}?overview=full&geometries=geojson`;
+
+    fetch(url, { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error('Routing request failed');
+        return res.json();
+      })
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        const coords =
+          data?.routes?.[0]?.geometry?.coordinates?.map(
+            (c: [number, number]) => [c[1], c[0]] as [number, number],
+          ) ?? null;
+
+        // Fallback to straight line only if routing fails
+        const latlngs: [number, number][] =
+          coords && coords.length > 1
+            ? coords
+            : [
+                [userLocation.lat, userLocation.lng],
+                [routeTarget.lat, routeTarget.lng],
+              ];
+
+        if (!routeLine.current) {
+          routeLine.current = L.polyline(latlngs, {
+            color: '#1f9450',
+            weight: 5,
+            opacity: 0.9,
+          }).addTo(map);
+        } else {
+          routeLine.current.setLatLngs(latlngs);
+        }
+
+        // Show the full road path on the map
+        try {
+          map.fitBounds(L.latLngBounds(latlngs), {
+            padding: [48, 48],
+            maxZoom: 16,
+            animate: true,
+          });
+        } catch {
+          /* ignore invalid bounds */
+        }
+      })
+      .catch((err) => {
+        if (err?.name === 'AbortError') return;
+        const latlngs: [number, number][] = [
+          [userLocation.lat, userLocation.lng],
+          [routeTarget.lat, routeTarget.lng],
+        ];
+        if (!routeLine.current) {
+          routeLine.current = L.polyline(latlngs, {
+            color: '#1f9450',
+            weight: 5,
+            opacity: 0.9,
+            dashArray: '8 10',
+          }).addTo(map);
+        } else {
+          routeLine.current.setLatLngs(latlngs);
+        }
+      });
+
+    return () => controller.abort();
+  }, [userLocation, routeTarget, mapRef]);
+
+  return <div className="leaflet-map" ref={root} />;
 }
 
-export function signupRequest(firstName: string, lastName: string, phoneNumber: string, email: string, password: string) {
-  return request<AuthResponse>('/auth/signup', {
-    method: 'POST',
-    body: JSON.stringify({ firstName, lastName, phoneNumber, email, password }),
-  });
+function Dashboard() {
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState<Category | null>(null);
+  const [selected, setSelected] = useState<Place | null>(null);
+  const [notice, setNotice] = useState('');
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [legendOpen, setLegendOpen] = useState(false);
+  const [saved, setSaved] = useState<string[]>([]);
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
+  const [tracking, setTracking] = useState(false);
+  const [resultsOpen, setResultsOpen] = useState(false);
+  const [routeTarget, setRouteTarget] = useState<Place | null>(null);
+  const mapRef = useRef<any>(null);
+  const watchId = useRef<number | null>(null);
+  const hasCentered = useRef(false);
+
+  // Match by name, area, or category (partial category ok: "school" -> "Schools / Universities")
+  const matchesQuery = useCallback((place: Place, q: string) => {
+    const term = q.trim().toLowerCase();
+    if (!term) return true;
+    const haystack = `${place.name} ${place.area} ${place.category}`.toLowerCase();
+    if (haystack.includes(term)) return true;
+    const categoryWords = place.category
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/);
+    return categoryWords.some((word) => word.startsWith(term) || term.startsWith(word));
+  }, []);
+
+  // Map markers: respect legend category filter + search query
+  const visible = useMemo(
+    () => places.filter((p) => (!active || p.category === active) && matchesQuery(p, query)),
+    [active, query, matchesQuery],
+  );
+
+  // Dropdown: ALL matching places from full dataset, sorted closest -> farthest
+  const sortedResults = useMemo(() => {
+    const list = places.filter((p) => matchesQuery(p, query));
+    if (userLocation) {
+      list.sort((a, b) => distanceKm(userLocation, a) - distanceKm(userLocation, b));
+    } else {
+      list.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return list;
+  }, [query, userLocation, matchesQuery]);
+
+  const selectPlace = useCallback((place: Place) => {
+    setSelected(place);
+    mapRef.current?.flyTo([place.lat, place.lng], 15, { animate: true, duration: 0.7 });
+  }, []);
+
+  const search = () => {
+    const first = sortedResults[0];
+    if (first) selectPlace(first);
+    setNotice(
+      first
+        ? `${sortedResults.length} place${sortedResults.length === 1 ? '' : 's'} found`
+        : 'No places found',
+    );
+  };
+
+  const locate = () => {
+    if (!navigator.geolocation) {
+      setNotice('Geolocation is not supported on this device.');
+      return;
+    }
+    if (tracking) {
+      if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
+      watchId.current = null;
+      hasCentered.current = false;
+      setTracking(false);
+      setUserLocation(null);
+      setRouteTarget(null);
+      setNotice('Live location turned off.');
+      return;
+    }
+    setTracking(true);
+    setNotice('Getting your live location...');
+    watchId.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        setUserLocation({ lat: latitude, lng: longitude, accuracy });
+        if (!hasCentered.current) {
+          mapRef.current?.flyTo([latitude, longitude], 15, { animate: true, duration: 0.7 });
+          hasCentered.current = true;
+        }
+        setNotice('Showing your live location.');
+      },
+      () => {
+        setNotice('We could not access your location.');
+        setTracking(false);
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
+    );
+  };
+
+  useEffect(
+    () => () => {
+      if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
+    },
+    [],
+  );
+
+  // In-map directions: set route target, start live location if needed.
+  // LeafletMap fetches a real road path via OSRM and fits it on the map.
+  const getDirections = (place: Place) => {
+    setRouteTarget(place);
+    if (!tracking) locate();
+    setNotice(`Getting road directions to ${place.name}...`);
+  };
+
+  const details = selected
+    ? {
+        address:
+          selected.category === 'SPCA'
+            ? '1 Bird Street, Grassy Park'
+            : `${selected.area} service centre, Cape Town`,
+        hours: selected.category === 'Hospitals' ? 'Open 24 hours' : '08:00 – 16:30',
+        phone: selected.category === 'SPCA' ? '021 700 4158' : '021 400 0000',
+      }
+    : null;
+
+  return (
+    <main className="guide-shell">
+      <LeafletMap
+        places={visible}
+        selected={selected}
+        onSelect={selectPlace}
+        mapRef={mapRef}
+        userLocation={userLocation}
+        routeTarget={routeTarget}
+      />
+      <header className="masthead">
+        <h1>The Cape Guide</h1>
+        <p>Find. Navigate. Connect.</p>
+      </header>
+      <section className="search-panel">
+        <span className="glass">
+          <Search size={19} />
+        </span>
+        <input
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setResultsOpen(true);
+          }}
+          onFocus={() => query.trim() && setResultsOpen(true)}
+          onBlur={() => setTimeout(() => setResultsOpen(false), 150)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              search();
+              setResultsOpen(false);
+            }
+            if (e.key === 'Escape') setResultsOpen(false);
+          }}
+          placeholder="Search for a place or service..."
+        />
+        <button
+          className="search-button"
+          onClick={() => {
+            search();
+            setResultsOpen(false);
+          }}
+        >
+          Search
+        </button>
+        <button
+          className={`locate${tracking ? ' active' : ''}`}
+          title={tracking ? 'Stop live location' : 'Show my live location'}
+          onClick={locate}
+        >
+          <LocateFixed size={17} />
+        </button>
+      </section>
+      {resultsOpen && query.trim() && (
+        <div className="search-results" onMouseDown={(e) => e.preventDefault()}>
+          {sortedResults.length === 0 ? (
+            <div className="search-results-empty">No places found</div>
+          ) : (
+            sortedResults.map((place) => (
+              <div
+                key={place.name}
+                className="search-result-row"
+                onClick={() => {
+                  selectPlace(place);
+                  setQuery(place.name);
+                  setResultsOpen(false);
+                }}
+              >
+                <span
+                  className="search-result-icon"
+                  style={{ background: categories.find((c) => c.name === place.category)?.color }}
+                >
+                  {categoryIcon(place.category, 14)}
+                </span>
+                <div className="search-result-info">
+                  <strong>{place.name}</strong>
+                  <span>
+                    {place.category}
+                    {userLocation ? ` · ${formatDistance(distanceKm(userLocation, place))} away` : ''}
+                  </span>
+                </div>
+                <button
+                  className="search-result-directions"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    getDirections(place);
+                    setQuery(place.name);
+                    setResultsOpen(false);
+                  }}
+                >
+                  <Navigation size={13} />
+                  Directions
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+      {notice && <div className="notice">{notice}</div>}
+      {selected && details && (
+        <section className="service-popup">
+          <button className="service-close" aria-label="Close service" onClick={() => setSelected(null)}>
+            <X size={18} />
+          </button>
+          <div className="service-title">
+            <span
+              className="service-icon"
+              style={{ background: categories.find((c) => c.name === selected.category)?.color }}
+            >
+              {categoryIcon(selected.category, 18)}
+            </span>
+            <div>
+              <h2>{selected.name}</h2>
+              <p>{selected.category}</p>
+            </div>
+          </div>
+          <div className="service-info">
+            <p>
+              <MapPinned size={17} />
+              <span>
+                {details.address}
+                <br />
+                Cape Town
+              </span>
+            </p>
+            <p>
+              <Clock3 size={17} />
+              {details.hours}
+            </p>
+            <p>
+              <Phone size={17} />
+              {details.phone}
+            </p>
+          </div>
+          <div className="service-actions">
+            <button onClick={() => setNotice(`More details for ${selected.name} coming soon.`)}>
+              View Details
+            </button>
+            <button className="directions" onClick={() => getDirections(selected)}>
+              <Navigation size={14} />
+              Get Directions
+            </button>
+            <button
+              className={saved.includes(selected.name) ? 'saved' : ''}
+              onClick={() =>
+                setSaved(
+                  saved.includes(selected.name)
+                    ? saved.filter((name) => name !== selected.name)
+                    : [...saved, selected.name],
+                )
+              }
+            >
+              <Bookmark size={15} />
+              {saved.includes(selected.name) ? 'Saved' : 'Save'}
+            </button>
+          </div>
+        </section>
+      )}
+      <button className="panel-trigger about-trigger" onClick={() => setAboutOpen(true)}>
+        <BookOpen size={17} />
+        About the Guide
+      </button>
+      <button className="panel-trigger legend-trigger" onClick={() => setLegendOpen(true)}>
+        <MapPinned size={17} />
+        Legend
+      </button>
+      {aboutOpen && (
+        <aside className="about popup-panel">
+          <button className="close-panel" aria-label="Close about" onClick={() => setAboutOpen(false)}>
+            <X size={17} />
+          </button>
+          <h2>
+            About the Cape
+            <br />
+            Guide
+          </h2>
+          <p>
+            The Cape Guide is a map-based service finder designed to help people discover useful public
+            services across Cape Town. Search, explore and navigate to the services you need — all from one
+            map.
+          </p>
+          <div className="motto">
+            Every road leads somewhere.
+            <br />
+            Every service helps someone.
+          </div>
+        </aside>
+      )}
+      {legendOpen && (
+        <aside className="legend popup-panel">
+          <button className="close-panel" aria-label="Close legend" onClick={() => setLegendOpen(false)}>
+            <X size={17} />
+          </button>
+          <h2>Legend</h2>
+          {categories.map((item) => (
+            <button
+              key={item.name}
+              className={active === item.name ? 'active' : ''}
+              onClick={() => {
+                setActive(active === item.name ? null : item.name);
+                setSelected(null);
+              }}
+            >
+              <i style={{ background: item.color }}>{categoryIcon(item.name)}</i>
+              {item.name}
+            </button>
+          ))}
+          <button className="you-are" onClick={locate}>
+            <i>
+              <MapPinned size={16} />
+            </i>
+            You Are Here
+          </button>
+        </aside>
+      )}
+      <div className="leaflet-zoom">
+        <button aria-label="Zoom in" onClick={() => mapRef.current?.zoomIn()}>
+          <Plus size={18} />
+        </button>
+        <button aria-label="Zoom out" onClick={() => mapRef.current?.zoomOut()}>
+          <Minus size={18} />
+        </button>
+      </div>
+    </main>
+  );
 }
 
-export function forgotPasswordRequest(email: string) {
-  return request<{ message: string }>('/auth/forgot-password', {
-    method: 'POST',
-    body: JSON.stringify({ email }),
-  });
-}
-
-export function resetPasswordRequest(accessToken: string, password: string) {
-  return request<{ message: string }>('/auth/reset-password', {
-    method: 'POST',
-    body: JSON.stringify({ accessToken, password }),
-  });
-}
-
-// ---------- Services ----------
-
-import type { Service } from '../types/service.types';
-
-export function getServices(params?: { type?: string; q?: string; limit?: number }) {
-  const search = new URLSearchParams();
-  if (params?.type) search.set('type', params.type);
-  if (params?.q) search.set('q', params.q);
-  if (params?.limit) search.set('limit', String(params.limit));
-  const qs = search.toString();
-  return request<Service[]>(`/services${qs ? `?${qs}` : ''}`, { method: 'GET' });
-}
-
-export function getServiceDetails(externalId: string) {
-  return request<Service>(`/services/${encodeURIComponent(externalId)}`, { method: 'GET' });
-}
+export default Dashboard;
 </file>
 
 <file path="frontend/package.json">
@@ -2209,95 +3014,143 @@ export function getServiceDetails(externalId: string) {
 }
 </file>
 
-<file path="backend/src/api/geoapify/client.ts">
-import { request, setRateLimit, requireEnv } from '../lib/http'
-import { upsertToSupabase } from '../lib/supabase'
-import { ensureServiceCategories, resolveCategorySlug } from '../../services/categoryService'
+<file path="frontend/tsconfig.tsbuildinfo">
+{"root":["./src/app.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/adminpanel/adminpanel.tsx","./src/components/auth/authlayout.tsx","./src/components/auth/loginform.tsx","./src/components/auth/signupform.tsx","./src/components/dashboard/dashboard.tsx","./src/components/map/mapmarker.tsx","./src/components/map/mapview.tsx","./src/components/searchbar/searchbar.tsx","./src/components/servicecard/servicecard.tsx","./src/components/common/button.tsx","./src/components/common/loader.tsx","./src/components/common/navbar.tsx","./src/context/authcontext.tsx","./src/db/index.ts","./src/db/servicecache.ts","./src/hooks/useauth.ts","./src/hooks/useservices.ts","./src/pages/admin.tsx","./src/pages/dashboard.tsx","./src/pages/forgotpassword.tsx","./src/pages/home.tsx","./src/pages/login.tsx","./src/pages/resetpassword.tsx","./src/pages/signup.tsx","./src/services/api.ts","./src/services/authservice.ts","./src/services/mapsservice.ts","./src/types/service.types.ts","./src/types/user.types.ts","./src/utils/constants.ts","./src/utils/formatters.ts"],"version":"5.9.3"}
+</file>
 
-setRateLimit('geoapify', 10, 60_000)
+<file path="backend/src/api/lib/http.ts">
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+import { RateLimiter } from './rate_limit'
 
+const limiters = new Map<string, RateLimiter>()
 
-const geoapifyUrl = process.env.GEOAPIFY_URL || 'https://api.geoapify.com/v2/places'
-
-export function geopaify(key: string, format: 'json' | 'xml' = 'json' ) {
-  return {
-    get: (path: string, extraParams: Record<string, string | number> = {}) =>
-      request(geoapifyUrl, path, {
-        params: { apiKey: key, format, ...extraParams },
-        limiter: 'geoapify',
-      }),
-  }
+export function setRateLimit(name: string, maxCalls: number, windowMs: number) {
+  limiters.set(name, new RateLimiter(maxCalls, windowMs))
 }
 
-
-let importInProgress = false
-
-//sends API data to supabase 
-export async function importServices(
-  key = requireEnv('GEOAPIFY_API_KEY', process.env.GEOAPIFY_API_KEY),
-  path = ''
-) {
-  if (importInProgress) return { imported: 0, skipped: true }
-  importInProgress = true
-
-  try {
-    const categoryMap = await ensureServiceCategories()
-    const data = await geopaify(key).get(path,{
-
-      categories: [
-        'office.government.migration',
-        'office.government.public_service',
-        'service.fire_station',
-        'service.social_facility.shelter',
-        'healthcare.hospital',
-        'healthcare.clinic_or_praxis',
-        'healthcare.pharmacy',
-        'healthcare.dentist',
-        'education.library',
-        'education.school',
-        'service.police',
-      ].join(','),
-      filter: 'rect:16.45,-35.15,24.85,-28.45', // Western Cape bounding box
-      limit: 300
-    })
-
-    const services = data.features.flatMap((feature: any) => {
-      const props = feature.properties
-      const address = typeof props.formatted === 'string' ? props.formatted.trim() : ''
-      const name = typeof props.name === 'string' ? props.name.trim() : ''
-      const coordinates = feature.geometry?.coordinates
-
-      if (!address || !Array.isArray(coordinates) || coordinates.length < 2) return []
-
-      const [lon, lat] = coordinates
-      const categorySlug = resolveCategorySlug(props.categories, name, address)
-      const category = categorySlug ? categoryMap.get(categorySlug) : undefined
-
-      return [{
-        external_id: props.place_id,
-        name: name || address,
-        type: category?.name ?? null,
-        category_id: category?.id ?? null,
-        formatted_address: address,
-        location: `SRID=4326;POINT(${lon} ${lat})`,
-        opening_hours: props.opening_hours ?? null,
-        website: props.website ?? null,
-        wheelchair: props.datasource?.raw?.wheelchair ?? null,
-        sourcename: props.datasource?.sourcename ?? 'osm',
-        imported_at: new Date().toISOString()
-      }]
-    })
-
-    await upsertToSupabase('services', services, {
-      batchSize: 100,
-      onConflict: 'external_id',
-    })
-
-    return { imported: services.length, skipped: false }
-  } finally {
-    importInProgress = false
-  }
+export async function waitForRateLimit(name: string): Promise<void> {
+  const limiter = limiters.get(name)
+  if (limiter) await limiter.waitForSlot()
 }
+export function requireEnv(name: string, value: string | undefined): string {
+  if (!value) throw new Error(`${name} is not configured`)
+  return value
+}
+
+export async function request<T = any>(
+  baseUrl: string,
+  path: string,
+  options: {
+    method?: string
+    headers?: Record<string, string>
+    params?: Record<string, string | number>
+    body?: unknown
+    retries?: number         
+    limiter?: string          
+  } = {}
+): Promise<T> {
+  const url = new URL(baseUrl + path)
+  for (const [k, v] of Object.entries(options.params ?? {})) {
+    url.searchParams.set(k, String(v))
+  }
+
+  const limiterName = options.limiter
+  if (limiterName !== undefined) await waitForRateLimit(limiterName)
+
+  const res = await fetch(url, {
+    method: options.method ?? 'GET',
+    headers: options.body ? { 'Content-Type': 'application/json', ...options.headers } : options.headers,
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  })
+
+ //acts as the rate throttle 
+  const retries = options.retries ?? 1
+  if ((res.status === 429 || res.status >= 500) && retries > 0) {
+    const retryAfter = Number(res.headers.get('Retry-After'))   // seconds, if they told us
+    const waitMs = retryAfter > 0
+      ? retryAfter * 1000                                        
+      : 250 * Math.pow(2, (options.retries ?? 1) - retries + 1) 
+    console.warn(`[http] ${res.status} — retrying in ${waitMs}ms (${retries} left)`)
+    await sleep(waitMs)
+    return request(baseUrl, path, { ...options, retries: retries - 1 })
+  }
+  if (!res.ok) {
+    const safeUrl = new URL(url)
+    safeUrl.searchParams.delete('apiKey')
+    safeUrl.searchParams.delete('key')
+    const responseText = await res.text()
+    let upstreamMessage = responseText
+
+    try {
+      const responseBody = JSON.parse(responseText) as {
+        detailedError?: { message?: string }
+      }
+      upstreamMessage = responseBody.detailedError?.message ?? responseText
+    } catch {
+      // Keep the raw response when the upstream service does not return JSON.
+    }
+
+    throw new Error(`${res.status} ${res.statusText}: ${upstreamMessage} (${safeUrl})`)
+  }
+  return res.json()
+
+
+  
+}
+</file>
+
+<file path="backend/src/routes/accidentRoutes.ts">
+import { Router } from 'express';
+import { getAccidentDetails, getTrafficIncidents } from '../controllers/accidentController'
+const router = Router();
+
+router.get('/', getTrafficIncidents)
+router.get('/:externalId', getAccidentDetails);
+
+
+
+export default router;
+</file>
+
+<file path="backend/src/routes/serviceRoutes.ts">
+import { Router } from 'express';
+import { getServiceDetails, getServices, updateService } from '../controllers/serviceController';
+import { authenticateToken, requireAdmin } from '../middleware/auth';
+
+const router = Router();
+
+router.get('/', getServices);
+router.get('/:externalId', getServiceDetails);
+router.patch('/:id', authenticateToken, requireAdmin, updateService);
+// router.post('/suggest', suggestService);
+
+export default router;
+</file>
+
+<file path="backend/.env.example">
+PORT=5000
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_KEY=your_supabase_service_key
+MAPS_API_KEY=your_maps_api_key_here
+MAPS_DAILY_LIMIT=1000
+FIREBASE_PROJECT_ID=
+FIREBASE_CLIENT_EMAIL=
+FIREBASE_PRIVATE_KEY=
+GEOAPIFY_API_KEY=your_geoapify_api_key_here
+ADMIN_IMPORT_TOKEN=use_a_long_random_value
+# Optional. Set to true to import services once when the server boots.
+AUTO_IMPORT_SERVICES=false
+# Optional. Leave blank to disable automatic imports.
+IMPORT_INTERVAL_MS=0
+# Optional. Set to true to import traffic incidents once when the server boots.
+AUTO_IMPORT_TRAFFIC=false
+# Optional. Milliseconds between automatic traffic incident imports (1 TomTom request per run).
+# Leave blank or 0 to disable.
+# Budget note: TomTom's free tier for Traffic Incidents API Details is 2500 requests/MONTH.
+#   300000 (5 min) = ~8640/month = 346% of the free quota  <-- over budget
+#   1800000 (30 min) = ~1440/month = 58% of the free quota  <-- recommended
+#   3600000 (60 min) = ~720/month  = 29% of the free quota
+TRAFFIC_IMPORT_INTERVAL_MS=0
 </file>
 
 <file path="backend/src/models/Service.ts">
@@ -2396,99 +3249,146 @@ export async function findServiceById(id: string) {
 }
 </file>
 
-<file path="backend/src/routes/serviceRoutes.ts">
-import { Router } from 'express';
-import { getServiceDetails, getServices, updateService } from '../controllers/serviceController';
-import { authenticateToken, requireAdmin } from '../middleware/auth';
+<file path="backend/src/server.ts">
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
 
-const router = Router();
+import serviceRoutes from './routes/serviceRoutes';
+import authRoutes from './routes/authRoutes';
+import adminRoutes from './routes/adminRoutes';
+import accidentRoutes from './routes/accidentRoutes';
+import { importServices } from './api/geoapify/client';
+import { importTrafficIncidents } from './api/tomtom/client';
+import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 
-router.get('/', getServices);
-router.get('/:externalId', getServiceDetails);
-router.patch('/:id', authenticateToken, requireAdmin, updateService);
-// router.post('/suggest', suggestService);
+const app = express();
+app.use(cors());
+app.use(express.json());
 
-export default router;
+app.use('/api/services', serviceRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/traffic-incidents', accidentRoutes);
+app.use(notFoundHandler);
+app.use(errorHandler);
+
+const importIntervalMs = Number(process.env.IMPORT_INTERVAL_MS || 0);
+if (process.env.AUTO_IMPORT_SERVICES === 'true') {
+	importServices().catch((error) => console.error('[import] initial import failed', error));
+}
+
+if (importIntervalMs > 0) {
+	setInterval(() => {
+		importServices().catch((error) => console.error('[import] failed', error));
+	}, importIntervalMs);
+}
+
+// Traffic incidents are a "present" snapshot, so they are refreshed on an interval.
+// The importer's own lock returns { skipped: true } if a run is still in flight.
+const trafficImportIntervalMs = Number(process.env.TRAFFIC_IMPORT_INTERVAL_MS || 0);
+if (process.env.AUTO_IMPORT_TRAFFIC === 'true') {
+	importTrafficIncidents().catch((error) => console.error('[import] initial traffic import failed', error));
+}
+
+if (trafficImportIntervalMs > 0) {
+	setInterval(() => {
+		importTrafficIncidents().catch((error) => console.error('[import] traffic import failed', error));
+	}, trafficImportIntervalMs);
+}
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 </file>
 
-<file path="backend/src/api/lib/http.ts">
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-import { RateLimiter } from './rate_limit'
+<file path="frontend/src/services/api.ts">
+import type { TrafficIncident } from '../types/traffic.types';
 
-const limiters = new Map<string, RateLimiter>()
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
-export function setRateLimit(name: string, maxCalls: number, windowMs: number) {
-  limiters.set(name, new RateLimiter(maxCalls, windowMs))
-}
+type ApiError = { error?: string };
 
-export async function waitForRateLimit(name: string): Promise<void> {
-  const limiter = limiters.get(name)
-  if (limiter) await limiter.waitForSlot()
-}
-export function requireEnv(name: string, value: string | undefined): string {
-  if (!value) throw new Error(`${name} is not configured`)
-  return value
-}
-
-export async function request<T = any>(
-  baseUrl: string,
-  path: string,
-  options: {
-    method?: string
-    headers?: Record<string, string>
-    params?: Record<string, string | number>
-    body?: unknown
-    retries?: number         
-    limiter?: string          
-  } = {}
-): Promise<T> {
-  const url = new URL(baseUrl + path)
-  for (const [k, v] of Object.entries(options.params ?? {})) {
-    url.searchParams.set(k, String(v))
+async function request<T>(path: string, options: RequestInit): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+        ...options.headers,
+      },
+    });
+  } catch {
+    throw new Error('Unable to reach the authentication server. Start the backend and check its Supabase configuration.');
   }
 
-  const limiterName = options.limiter
-  if (limiterName !== undefined) await waitForRateLimit(limiterName)
-
-  const res = await fetch(url, {
-    method: options.method ?? 'GET',
-    headers: options.body ? { 'Content-Type': 'application/json', ...options.headers } : options.headers,
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  })
-
- //acts as the rate throttle 
-  const retries = options.retries ?? 1
-  if ((res.status === 429 || res.status >= 500) && retries > 0) {
-    const retryAfter = Number(res.headers.get('Retry-After'))   // seconds, if they told us
-    const waitMs = retryAfter > 0
-      ? retryAfter * 1000                                        
-      : 250 * Math.pow(2, (options.retries ?? 1) - retries + 1) 
-    console.warn(`[http] ${res.status} — retrying in ${waitMs}ms (${retries} left)`)
-    await sleep(waitMs)
-    return request(baseUrl, path, { ...options, retries: retries - 1 })
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) {
+    const preview = await response.text();
+    throw new Error(`Expected JSON, got "${contentType}": ${preview.slice(0, 150)}`);
   }
-  if (!res.ok) {
-    const safeUrl = new URL(url)
-    safeUrl.searchParams.delete('apiKey')
-    safeUrl.searchParams.delete('key')
-    const responseText = await res.text()
-    let upstreamMessage = responseText
 
-    try {
-      const responseBody = JSON.parse(responseText) as {
-        detailedError?: { message?: string }
-      }
-      upstreamMessage = responseBody.detailedError?.message ?? responseText
-    } catch {
-      // Keep the raw response when the upstream service does not return JSON.
-    }
+  const payload = await response.json() as T & ApiError;
+  if (!response.ok) throw new Error(payload.error || 'Something went wrong.');
+  return payload;
+}
 
-    throw new Error(`${res.status} ${res.statusText}: ${upstreamMessage} (${safeUrl})`)
-  }
-  return res.json()
+export type AuthResponse = {
+  user: { id: string; email?: string };
+  session?: { access_token: string; refresh_token: string };
+  needsEmailConfirmation?: boolean;
+};
 
+export async function getTrafficIncidents(): Promise<TrafficIncident[]> {
+  const response = await fetch(`${API_BASE_URL}/traffic-incidents`);
+  if (!response.ok) throw new Error(`Unable to load traffic incidents (${response.status})`);
+  return response.json() as Promise<TrafficIncident[]>;
+}
 
-  
+export function loginRequest(email: string, password: string) {
+  return request<AuthResponse>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function signupRequest(firstName: string, lastName: string, phoneNumber: string, email: string, password: string) {
+  return request<AuthResponse>('/auth/signup', {
+    method: 'POST',
+    body: JSON.stringify({ firstName, lastName, phoneNumber, email, password }),
+  });
+}
+
+export function forgotPasswordRequest(email: string) {
+  return request<{ message: string }>('/auth/forgot-password', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function resetPasswordRequest(accessToken: string, password: string) {
+  return request<{ message: string }>('/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({ accessToken, password }),
+  });
+}
+
+// ---------- Services ----------
+
+import type { Service } from '../types/service.types';
+
+export function getServices(params?: { type?: string; q?: string; limit?: number }) {
+  const search = new URLSearchParams();
+  if (params?.type) search.set('type', params.type);
+  if (params?.q) search.set('q', params.q);
+  if (params?.limit) search.set('limit', String(params.limit));
+  const qs = search.toString();
+  return request<Service[]>(`/services${qs ? `?${qs}` : ''}`, { method: 'GET' });
+}
+
+export function getServiceDetails(externalId: string) {
+  return request<Service>(`/services/${encodeURIComponent(externalId)}`, { method: 'GET' });
 }
 </file>
 
@@ -2502,9 +3402,18 @@ export async function request<T = any>(
 body {
   margin: 0;
   min-width: 320px;
-  font-family: 'DM Sans', sans-serif;
+  font-family: "DM Sans", sans-serif;
   color: #523c28;
   background: #e9d5a4;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+a {
+  color: inherit;
 }
 
 button,
@@ -2942,6 +3851,7 @@ a {
     gap: 13px;
   }
 }
+
 
 .guide-shell {
   height: 100vh;
@@ -3601,6 +4511,384 @@ a {
     font-size: 10px;
   }
 }
+/* Live user location marker */
+.user-location-wrap {
+  background: none !important;
+  border: 0 !important;
+  z-index: 900 !important;
+}
+
+.user-location-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border-radius: 50%;
+  background: #22c55e;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .25), 0 1px 4px rgba(0, 0, 0, .35);
+}
+
+.user-location-pulse {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border-radius: 50%;
+  background: rgba(34, 197, 94, .5);
+  animation: user-location-pulse 1.8s ease-out infinite;
+}
+
+@keyframes user-location-pulse {
+  0% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(4.5); opacity: 0; }
+}
+
+.locate.active {
+  background: #22c55e;
+  border-color: #15803d;
+  color: #fff;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, .35);
+}
+
+/* Search results list */
+.search-results {
+  position: absolute;
+  z-index: 6;
+  top: 149px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(672px, 53vw);
+  max-height: min(70vh, 480px);
+  overflow-y: auto;
+  background: linear-gradient(180deg, #f8d992, #eebd72);
+  border: 1px solid #c59357;
+  box-shadow: 0 4px 10px #6d4a2754;
+}
+
+.search-results-empty {
+  padding: 16px;
+  text-align: center;
+  color: #7a5732;
+  font-size: 12px;
+}
+
+.search-result-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(133, 94, 50, .25);
+  cursor: pointer;
+  color: #553b24;
+}
+
+.search-result-row:last-child { border-bottom: 0; }
+.search-result-row:hover { background: rgba(101, 66, 31, .12); }
+
+.search-result-icon {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff6d8;
+}
+
+.search-result-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.search-result-info strong {
+  font-family: 'Playfair Display';
+  font-size: 13px;
+  color: #3f2c19;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-result-info span {
+  color: #7a5732;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+
+.search-result-directions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 11px;
+  border: 1px solid #65431f;
+  color: #fce5ae;
+  background: #65421f;
+  font: 600 10px Georgia;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  cursor: pointer;
+}
+
+.search-result-directions:hover { background: #7a5228; }
+
+@media (max-width: 780px) {
+  .search-results {
+    width: calc(100% - 84px);
+    top: 143px;
+  }
+}
+</file>
+
+<file path=".gitignore">
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+
+# Env files
+.env
+.env.local
+frontend/.env
+backend/.env
+
+# Build output
+frontend/dist/
+backend/dist/
+backend/build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# others
+.fallow/
+.repomix/
+
+frontend/package-lock.json
+backend/package-lock.json
+
+# Tooling output
+repomix-output.txt
+repomix-output-v*.txt
+repomix-output.xml
+</file>
+
+<file path="backend/src/api/geoapify/client.ts">
+import { request, setRateLimit, requireEnv } from '../lib/http'
+import { upsertToSupabase } from '../lib/supabase'
+import { ensureServiceCategories, resolveCategorySlug } from '../../services/categoryService'
+import { formatBbox, getNextSouthAfricaArea } from '../../config/southAfricaAreas'
+
+setRateLimit('geoapify', 10, 60_000)
+
+const geoapifyUrl = requireEnv('GEOAPIFY_URL', process.env.GEOAPIFY_URL)
+
+export function geoapifyClient(key: string, format: 'json' | 'xml' = 'json') {
+  return {
+    get: (path: string, extraParams: Record<string, string | number> = {}) =>
+      request(geoapifyUrl, path, {
+        params: { apiKey: key, format, ...extraParams },
+        limiter: 'geoapify',
+      }),
+  }
+}
+
+let importInProgress = false
+
+export async function importServices(
+  key = requireEnv('GEOAPIFY_API_KEY', process.env.GEOAPIFY_API_KEY),
+  path = ''
+) {
+  if (importInProgress) return { imported: 0, skipped: true }
+  importInProgress = true
+
+  try {
+    const categoryMap = await ensureServiceCategories()
+
+    const categories = [
+      'office.government.migration',
+      'office.government.public_service',
+      'service.fire_station',
+      'service.social_facility.shelter',
+      'healthcare.hospital',
+      'healthcare.clinic_or_praxis',
+      'healthcare.pharmacy',
+      'healthcare.dentist',
+      'education.library',
+      'education.school',
+      'service.police',
+    ].join(',')
+
+    const features: any[] = []
+    const area = getNextSouthAfricaArea('geoapify-services')
+
+    const pageSize = 300
+    const maxPages = Math.max(1, Number(process.env.GEOAPIFY_MAX_PAGES ?? 3))
+    for (let page = 0; page < maxPages; page++) {
+      const data = await geoapifyClient(key).get(path, {
+        categories,
+        filter: `rect:${formatBbox(area)}`,
+        limit: pageSize,
+        offset: page * pageSize,
+      })
+      const pageFeatures = data.features ?? []
+      features.push(...pageFeatures)
+      if (pageFeatures.length < pageSize) break
+    }
+
+    const services = features.flatMap((feature: any) => {
+      const props = feature.properties
+      const address = typeof props.formatted === 'string' ? props.formatted.trim() : ''
+      const name = typeof props.name === 'string' ? props.name.trim() : ''
+      const coordinates = feature.geometry?.coordinates
+
+      if (!address || !Array.isArray(coordinates) || coordinates.length < 2) return []
+
+      const [lon, lat] = coordinates
+      const categorySlug = resolveCategorySlug(props.categories, name, address)
+      const category = categorySlug ? categoryMap.get(categorySlug) : undefined
+
+      return [{
+        external_id: props.place_id,
+        name: name || address,
+        type: category?.name ?? null,
+        category_id: category?.id ?? null,
+        formatted_address: address,
+        location: `SRID=4326;POINT(${lon} ${lat})`,
+        opening_hours: props.opening_hours ?? null,
+        website: props.website ?? null,
+        wheelchair: props.datasource?.raw?.wheelchair ?? null,
+        sourcename: props.datasource?.sourcename ?? 'osm',
+        imported_at: new Date().toISOString()
+      }]
+    })
+
+    await upsertToSupabase('services', services, {
+      batchSize: 100,
+      onConflict: 'external_id',
+    })
+
+    return { imported: services.length, area: area.name, skipped: false }
+  } finally {
+    importInProgress = false
+  }
+}
+</file>
+
+<file path="backend/src/controllers/serviceController.ts">
+import { NextFunction, Request, Response } from 'express'
+import { supabase } from '../config/supabase'
+import { fetchServiceDetails, fetchServicesInRadius, updateServiceDetails, findServiceById } from '../models/Service'
+
+export async function getServices(req: Request, res: Response, next: NextFunction) {
+	try {
+		const type = typeof req.query.type === 'string' ? req.query.type : undefined
+		const search = typeof req.query.q === 'string' ? req.query.q.trim() : undefined
+		const requestedLimit = Number(req.query.limit ?? 100)
+		const limit = Number.isInteger(requestedLimit)
+			? Math.min(Math.max(requestedLimit, 1), 500)
+			: 100
+
+		let query = supabase
+			.from('services')
+			.select('*, category:service_categories(id,name,slug,parent_id)')
+			.limit(limit)
+
+		if (type) query = query.eq('category.slug', type)
+		if (search) query = query.ilike('name', `%${search}%`)
+
+		const { data, error } = await query
+		if (error) throw error
+
+		res.json(data ?? [])
+	} catch (error) {
+		next(error)
+	}
+}
+
+//fetch service details
+export async function getServiceDetails(req: Request, res: Response, next: NextFunction) {
+	try {
+		const service = await fetchServiceDetails(req.params.externalId)
+
+		if (!service) {
+			res.status(404).json({ message: 'Service not found' })
+			return
+		}
+
+		res.json(service)
+	} catch (error) {
+		next(error)
+	}
+}
+
+//update service details 
+export const updateService = async (req: Request, res: Response, next: NextFunction) => {
+	const id = req.params.id?.trim()
+	if (!id) return res.status(400).json({ message: 'Service id is required' })
+
+	try {
+		const { data: existing, error: findError } = await findServiceById(id)
+		if (findError || !existing) {
+			return res.status(404).json({ message: 'Service not found' })
+		}
+
+		const {
+			name,
+			type,
+			formatted_address,
+			location,
+			opening_hours,
+			website,
+			phone,
+			wheelchair,
+			sourcename,
+		} = req.body
+
+		const updates = Object.fromEntries(
+			Object.entries({
+				name,
+				type,
+				formatted_address,
+				location,
+				opening_hours,
+				website,
+				phone,
+				wheelchair,
+				sourcename,
+			}).filter(([, value]) => value !== undefined),
+		)
+
+		if (Object.keys(updates).length === 0) {
+			return res.status(400).json({ message: 'At least one service field is required' })
+		}
+
+		const { data, error } = await updateServiceDetails(id, updates)
+		if (error) throw error
+
+		return res.status(200).json({ data })
+	} catch (error) {
+		next(error)
+	}
+}
 </file>
 
 <file path="frontend/src/App.tsx">
@@ -3627,6 +4915,7 @@ declare const L: any;
 type Category = string;
 type Place = Omit<Service, 'category'> & { category: Category; lat: number; lng: number };
 type CategoryItem = { name: Category; color: string };
+type UserLocation = { lat: number; lng: number; accuracy: number };
 
 const categoryColors = ['#b94b3c', '#4f876f', '#cb8c38', '#3b77a2', '#375f93', '#81528d', '#77909c', '#815c54', '#bd6240', '#75664b', '#a45b83', '#847337', '#43858a'];
 const categoryColor = (category: string) =>
@@ -3650,6 +4939,17 @@ const getCoordinates = (location: Service['location']): [number, number] | null 
     view.getFloat64(coordinateOffset + 8, littleEndian),
   ];
 };
+
+function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
 
 const toPlace = (service: Service): Place | null => {
   const coordinates = getCoordinates(service.location);
@@ -3681,14 +4981,20 @@ const categoryIcon = (category: Category, size = 14) => {
 
 function LeafletMap({
   places, selected, onSelect, mapRef,
+  userLocation, radiusMeters,
 }: {
   places: Place[];
   selected: Place | null;
   onSelect: (place: Place) => void;
   mapRef: React.MutableRefObject<any>;
+  userLocation: UserLocation | null;
+  radiusMeters: number | null;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const layer = useRef<any>(null);
+  const userMarker = useRef<any>(null);
+  const accuracyCircle = useRef<any>(null);
+  const radiusCircle = useRef<any>(null);
 
   useEffect(() => {
     if (!root.current || !L) return;
@@ -3700,7 +5006,6 @@ function LeafletMap({
     }).addTo(map);
     mapRef.current = map;
     layer.current = L.layerGroup().addTo(map);
-    // Force Leaflet to recalculate size once the flex layout settles
     setTimeout(() => map.invalidateSize(), 0);
     return () => map.remove();
   }, [mapRef]);
@@ -3720,13 +5025,73 @@ function LeafletMap({
       marker.bindTooltip(`<strong>${place.name}</strong><br>${place.category}`, { direction: 'top', offset: [0, -38] });
       marker.on('click', () => onSelect(place));
     });
-    if (places.length > 0) {
+    // Only auto-fit if the user hasn't activated tracking/radius
+    if (places.length > 0 && !userLocation) {
       mapRef.current?.fitBounds(
         L.latLngBounds(places.map((place) => [place.lat, place.lng])),
         { padding: [48, 48], maxZoom: 12 },
       );
     }
-  }, [places, selected, onSelect]);
+  }, [places, selected, onSelect, userLocation]);
+
+  // User position dot + accuracy circle
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !L) return;
+
+    if (!userLocation) {
+      if (userMarker.current) { map.removeLayer(userMarker.current); userMarker.current = null; }
+      if (accuracyCircle.current) { map.removeLayer(accuracyCircle.current); accuracyCircle.current = null; }
+      return;
+    }
+
+    const { lat, lng, accuracy } = userLocation;
+    if (!userMarker.current) {
+      const icon = L.divIcon({
+        className: 'user-location-wrap',
+        html: '<span class="user-location-pulse"></span><span class="user-location-dot"></span>',
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+      });
+      userMarker.current = L.marker([lat, lng], { icon, zIndexOffset: 1000 }).addTo(map);
+      accuracyCircle.current = L.circle([lat, lng], {
+        radius: accuracy,
+        color: '#22c55e',
+        weight: 1,
+        fillColor: '#22c55e',
+        fillOpacity: 0.12,
+        interactive: false,
+      }).addTo(map);
+    } else {
+      userMarker.current.setLatLng([lat, lng]);
+      accuracyCircle.current.setLatLng([lat, lng]);
+      accuracyCircle.current.setRadius(accuracy);
+    }
+  }, [userLocation, mapRef]);
+
+  // Radius filter circle
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !L) return;
+    if (!userLocation || radiusMeters === null) {
+      if (radiusCircle.current) { map.removeLayer(radiusCircle.current); radiusCircle.current = null; }
+      return;
+    }
+    const center: [number, number] = [userLocation.lat, userLocation.lng];
+    if (!radiusCircle.current) {
+      radiusCircle.current = L.circle(center, {
+        radius: radiusMeters,
+        color: '#005a8a',
+        weight: 1,
+        fillColor: '#08aef0',
+        fillOpacity: 0.08,
+        interactive: false,
+      }).addTo(map);
+    } else {
+      radiusCircle.current.setLatLng(center);
+      radiusCircle.current.setRadius(radiusMeters);
+    }
+  }, [userLocation, radiusMeters, mapRef]);
 
   return <div className="leaflet-map" ref={root} />;
 }
@@ -3740,7 +5105,12 @@ function CapeGuide() {
   const [aboutOpen,   setAboutOpen] =   useState(false);
   const [legendOpen,  setLegendOpen] =  useState(false);
   const [saved,       setSaved] =       useState<string[]>([]);
+  const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
+  const [tracking,    setTracking] =    useState(false);
+  const [radiusMeters, setRadiusMeters] = useState<number | null>(2000);
   const mapRef =      useRef<any>(null);
+  const watchId =     useRef<number | null>(null);
+  const hasCentered = useRef(false);
 
   const places = useMemo(
     () => services.map(toPlace).filter((place): place is Place => place !== null),
@@ -3753,13 +5123,27 @@ function CapeGuide() {
     [places],
   );
 
-  const visible = useMemo(
-    () => places.filter((p) =>
-      (!active || p.category === active) &&
-      `${p.name} ${p.formatted_address ?? ''} ${p.category}`.toLowerCase().includes(query.toLowerCase()),
-    ),
-    [active, places, query],
-  );
+  const visible = useMemo(() => {
+    const filtered = places.filter((p) => {
+      if (active && p.category !== active) return false;
+      if (query && !`${p.name} ${p.formatted_address ?? ''} ${p.category}`
+        .toLowerCase().includes(query.toLowerCase())) return false;
+      if (userLocation && radiusMeters !== null) {
+        const d = distanceMeters(userLocation.lat, userLocation.lng, p.lat, p.lng);
+        if (d > radiusMeters) return false;
+      }
+      return true;
+    });
+
+    if (userLocation && radiusMeters !== null) {
+      filtered.sort((a, b) =>
+        distanceMeters(userLocation.lat, userLocation.lng, a.lat, a.lng) -
+        distanceMeters(userLocation.lat, userLocation.lng, b.lat, b.lng)
+      );
+    }
+
+    return filtered;
+  }, [active, places, query, userLocation, radiusMeters]);
 
   const selectPlace = useCallback((place: Place) => {
     setSelected(place);
@@ -3772,20 +5156,67 @@ function CapeGuide() {
     setNotice(first ? `${visible.length} place${visible.length === 1 ? '' : 's'} found` : 'No places found');
   };
 
-  const locate = () => navigator.geolocation?.getCurrentPosition(
-    (pos) => {
-      mapRef.current?.flyTo([pos.coords.latitude, pos.coords.longitude], 14);
-      setNotice('Showing your current location.');
+  useEffect(
+    () => () => {
+      if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
     },
-    () => setNotice('We could not access your location.'),
+    [],
   );
+
+  const locate = () => {
+    if (!navigator.geolocation) {
+      setNotice('Geolocation is not supported on this device.');
+      return;
+    }
+    if (tracking) {
+      if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
+      watchId.current = null;
+      hasCentered.current = false;
+      setTracking(false);
+      setUserLocation(null);
+      setNotice('Live location turned off.');
+      return;
+    }
+    setTracking(true);
+    setNotice('Getting your live location...');
+    watchId.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        setUserLocation({ lat: latitude, lng: longitude, accuracy });
+        if (!hasCentered.current) {
+          mapRef.current?.flyTo([latitude, longitude], 15, { animate: true, duration: 0.7 });
+          hasCentered.current = true;
+        }
+        setNotice(radiusMeters === null
+          ? 'Showing your live location.'
+          : `Showing services within ${radiusMeters / 1000} km.`);
+      },
+      () => {
+        setNotice('We could not access your location.');
+        setTracking(false);
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
+    );
+  };
+
+  const clearFilter = () => {
+    setRadiusMeters(null);
+    setNotice('Showing all services.');
+  };
 
   return (
     <main className="guide-shell">
       <Navbar />
 
       <div className="map-stage">
-        <LeafletMap places={visible} selected={selected} onSelect={selectPlace} mapRef={mapRef} />
+        <LeafletMap
+          places={visible}
+          selected={selected}
+          onSelect={selectPlace}
+          mapRef={mapRef}
+          userLocation={userLocation}
+          radiusMeters={radiusMeters}
+        />
 
         <header className="masthead">
           <h1>The Cape Guide</h1>
@@ -3801,7 +5232,11 @@ function CapeGuide() {
             placeholder="Search for a place or service..."
           />
           <button className="search-button" onClick={search}>Search</button>
-          <button className="locate" title="Use my location" onClick={locate}>
+          <button
+            className={`locate${tracking ? ' active' : ''}`}
+            title={tracking ? 'Stop live location' : 'Show my live location'}
+            onClick={locate}
+          >
             <LocateFixed size={17} />
           </button>
         </section>
@@ -3809,6 +5244,26 @@ function CapeGuide() {
         {loading && <div className="notice">Loading services...</div>}
         {error && <div className="notice">{error}</div>}
         {notice && !loading && <div className="notice">{notice}</div>}
+
+        {userLocation && (
+          <div className="radius-control">
+            {[1000, 2000, 5000, 10000, 25000].map((r) => (
+              <button
+                key={r}
+                className={radiusMeters === r ? 'active' : ''}
+                onClick={() => setRadiusMeters(r)}
+              >
+                {r / 1000} km
+              </button>
+            ))}
+            <button
+              className={radiusMeters === null ? 'active' : ''}
+              onClick={clearFilter}
+            >
+              All
+            </button>
+          </div>
+        )}
 
         {selected && (
           <section className="service-popup">
@@ -3914,104 +5369,6 @@ export default function App() {
       </Routes>
     </BrowserRouter>
   );
-}
-</file>
-
-<file path="backend/src/controllers/serviceController.ts">
-import { NextFunction, Request, Response } from 'express'
-import { supabase } from '../config/supabase'
-import { fetchServiceDetails, updateServiceDetails, findServiceById } from '../models/Service'
-
-export async function getServices(req: Request, res: Response, next: NextFunction) {
-	try {
-		const type = typeof req.query.type === 'string' ? req.query.type : undefined
-		const search = typeof req.query.q === 'string' ? req.query.q.trim() : undefined
-		const requestedLimit = Number(req.query.limit ?? 100)
-		const limit = Number.isInteger(requestedLimit)
-			? Math.min(Math.max(requestedLimit, 1), 500)
-			: 100
-
-		let query = supabase
-			.from('services')
-			.select('*, category:service_categories(id,name,slug,parent_id)')
-			.limit(limit)
-
-		if (type) query = query.eq('category.slug', type)
-		if (search) query = query.ilike('name', `%${search}%`)
-
-		const { data, error } = await query
-		if (error) throw error
-
-		res.json(data ?? [])
-	} catch (error) {
-		next(error)
-	}
-}
-
-//fetch service details
-export async function getServiceDetails(req: Request, res: Response, next: NextFunction) {
-	try {
-		const service = await fetchServiceDetails(req.params.externalId)
-
-		if (!service) {
-			res.status(404).json({ message: 'Service not found' })
-			return
-		}
-
-		res.json(service)
-	} catch (error) {
-		next(error)
-	}
-}
-
-//update service details 
-export const updateService = async (req: Request, res: Response, next: NextFunction) => {
-	const id = req.params.id?.trim()
-	if (!id) return res.status(400).json({ message: 'Service id is required' })
-
-	try {
-		const { data: existing, error: findError } = await findServiceById(id)
-		if (findError || !existing) {
-			return res.status(404).json({ message: 'Service not found' })
-		}
-
-		const {
-			name,
-			type,
-			formatted_address,
-			location,
-			opening_hours,
-			website,
-			phone,
-			wheelchair,
-			sourcename,
-		} = req.body
-
-		const updates = Object.fromEntries(
-			Object.entries({
-				name,
-				type,
-				formatted_address,
-				location,
-				opening_hours,
-				website,
-				phone,
-				wheelchair,
-				sourcename,
-			}).filter(([, value]) => value !== undefined),
-		)
-
-		if (Object.keys(updates).length === 0) {
-			return res.status(400).json({ message: 'At least one service field is required' })
-		}
-
-		const { data, error } = await updateServiceDetails(id, updates)
-		if (error) throw error
-
-		return res.status(200).json({ data })
-	} catch (error) {
-		next(error)
-	}
 }
 </file>
 

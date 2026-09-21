@@ -3,14 +3,13 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import Signup from './pages/Signup';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
-import Dashboard from './pages/Dashboard';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
-  Accessibility, BookOpen, Bookmark, Bus, Clock3, Flame, Globe,
-  GraduationCap, Heart, Hospital, House, Landmark, Library, LocateFixed,
-  MapPinned, Minus, Navigation, Phone, Pill, Plus, Search, Shield,
-  ShoppingBag, Smile, Stethoscope, X,
+  Accessibility, BookOpen, Bookmark, Clock3, Flame, Globe, GraduationCap,
+  Heart, Hospital, House, Landmark, Library, LocateFixed, MapPinned, Minus,
+  Navigation, Phone, Pill, Plus, Search, Shield, ShoppingBag, Smile,
+  Stethoscope, X,
 } from 'lucide-react';
 import Navbar from './components/common/Navbar';
 import { useServices } from './hooks/useServices';
@@ -57,6 +56,9 @@ function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number):
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
+const formatDistance = (m: number) =>
+  m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
+
 const toPlace = (service: Service): Place | null => {
   const coordinates = getCoordinates(service.location);
   if (!coordinates || coordinates.some((coordinate) => !Number.isFinite(coordinate))) return null;
@@ -87,7 +89,7 @@ const categoryIcon = (category: Category, size = 14) => {
 
 function LeafletMap({
   places, selected, onSelect, mapRef,
-  userLocation, radiusMeters,
+  userLocation, radiusMeters, routeTarget,
 }: {
   places: Place[];
   selected: Place | null;
@@ -95,12 +97,15 @@ function LeafletMap({
   mapRef: React.MutableRefObject<any>;
   userLocation: UserLocation | null;
   radiusMeters: number | null;
+  routeTarget: Place | null;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const layer = useRef<any>(null);
   const userMarker = useRef<any>(null);
   const accuracyCircle = useRef<any>(null);
   const radiusCircle = useRef<any>(null);
+  const routeLine = useRef<any>(null);
+  const lastRouteKey = useRef<string>('');
 
   useEffect(() => {
     if (!root.current || !L) return;
@@ -131,7 +136,6 @@ function LeafletMap({
       marker.bindTooltip(`<strong>${place.name}</strong><br>${place.category}`, { direction: 'top', offset: [0, -38] });
       marker.on('click', () => onSelect(place));
     });
-    // Only auto-fit if the user hasn't activated tracking/radius
     if (places.length > 0 && !userLocation) {
       mapRef.current?.fitBounds(
         L.latLngBounds(places.map((place) => [place.lat, place.lng])),
@@ -140,7 +144,6 @@ function LeafletMap({
     }
   }, [places, selected, onSelect, userLocation]);
 
-  // User position dot + accuracy circle
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !L) return;
@@ -161,12 +164,8 @@ function LeafletMap({
       });
       userMarker.current = L.marker([lat, lng], { icon, zIndexOffset: 1000 }).addTo(map);
       accuracyCircle.current = L.circle([lat, lng], {
-        radius: accuracy,
-        color: '#22c55e',
-        weight: 1,
-        fillColor: '#22c55e',
-        fillOpacity: 0.12,
-        interactive: false,
+        radius: accuracy, color: '#22c55e', weight: 1,
+        fillColor: '#22c55e', fillOpacity: 0.12, interactive: false,
       }).addTo(map);
     } else {
       userMarker.current.setLatLng([lat, lng]);
@@ -175,7 +174,6 @@ function LeafletMap({
     }
   }, [userLocation, mapRef]);
 
-  // Radius filter circle
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !L) return;
@@ -186,12 +184,8 @@ function LeafletMap({
     const center: [number, number] = [userLocation.lat, userLocation.lng];
     if (!radiusCircle.current) {
       radiusCircle.current = L.circle(center, {
-        radius: radiusMeters,
-        color: '#005a8a',
-        weight: 1,
-        fillColor: '#08aef0',
-        fillOpacity: 0.08,
-        interactive: false,
+        radius: radiusMeters, color: '#005a8a', weight: 1,
+        fillColor: '#08aef0', fillOpacity: 0.08, interactive: false,
       }).addTo(map);
     } else {
       radiusCircle.current.setLatLng(center);
@@ -199,21 +193,84 @@ function LeafletMap({
     }
   }, [userLocation, radiusMeters, mapRef]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !L) return;
+
+    if (!userLocation || !routeTarget) {
+      if (routeLine.current) { map.removeLayer(routeLine.current); routeLine.current = null; }
+      lastRouteKey.current = '';
+      return;
+    }
+
+    const key = `${routeTarget.lat.toFixed(4)},${routeTarget.lng.toFixed(4)}|${userLocation.lat.toFixed(3)},${userLocation.lng.toFixed(3)}`;
+    if (key === lastRouteKey.current && routeLine.current) return;
+    lastRouteKey.current = key;
+
+    const controller = new AbortController();
+    const from = `${userLocation.lng},${userLocation.lat}`;
+    const to = `${routeTarget.lng},${routeTarget.lat}`;
+    const url = `https://router.project-osrm.org/route/v1/driving/${from};${to}?overview=full&geometries=geojson`;
+
+    fetch(url, { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error('Routing request failed');
+        return res.json();
+      })
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        const coords = data?.routes?.[0]?.geometry?.coordinates?.map(
+          (c: [number, number]) => [c[1], c[0]] as [number, number],
+        ) ?? null;
+        const latlngs: [number, number][] = coords && coords.length > 1
+          ? coords
+          : [[userLocation.lat, userLocation.lng], [routeTarget.lat, routeTarget.lng]];
+
+        if (!routeLine.current) {
+          routeLine.current = L.polyline(latlngs, { color: '#1f9450', weight: 5, opacity: 0.9 }).addTo(map);
+        } else {
+          routeLine.current.setLatLngs(latlngs);
+        }
+
+        try {
+          map.fitBounds(L.latLngBounds(latlngs), { padding: [48, 48], maxZoom: 16, animate: true });
+        } catch { /* ignore */ }
+      })
+      .catch((err) => {
+        if (err?.name === 'AbortError') return;
+        const latlngs: [number, number][] = [
+          [userLocation.lat, userLocation.lng],
+          [routeTarget.lat, routeTarget.lng],
+        ];
+        if (!routeLine.current) {
+          routeLine.current = L.polyline(latlngs, {
+            color: '#1f9450', weight: 5, opacity: 0.9, dashArray: '8 10',
+          }).addTo(map);
+        } else {
+          routeLine.current.setLatLngs(latlngs);
+        }
+      });
+
+    return () => controller.abort();
+  }, [userLocation, routeTarget, mapRef]);
+
   return <div className="leaflet-map" ref={root} />;
 }
 
 function CapeGuide() {
-  const { services,   loading, error } = useServices();
-  const [query,       setQuery] =       useState('');
-  const [active,      setActive] =      useState<Category | null>(null);
-  const [selected,    setSelected] =    useState<Place | null>(null);
-  const [notice,      setNotice] =      useState('');
-  const [aboutOpen,   setAboutOpen] =   useState(false);
-  const [legendOpen,  setLegendOpen] =  useState(false);
-  const [saved,       setSaved] =       useState<string[]>([]);
+  const { services, loading, error } = useServices();
+  const [query,        setQuery]        = useState('');
+  const [active,       setActive]       = useState<Category | null>(null);
+  const [selected,     setSelected]     = useState<Place | null>(null);
+  const [notice,       setNotice]       = useState('');
+  const [aboutOpen,    setAboutOpen]    = useState(false);
+  const [legendOpen,   setLegendOpen]   = useState(false);
+  const [saved,        setSaved]        = useState<string[]>([]);
   const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
-  const [tracking,    setTracking] =    useState(false);
+  const [tracking,     setTracking]     = useState(false);
   const [radiusMeters, setRadiusMeters] = useState<number | null>(2000);
+  const [resultsOpen,  setResultsOpen]  = useState(false);
+  const [routeTarget,  setRouteTarget]  = useState<Place | null>(null);
   const mapRef =      useRef<any>(null);
   const watchId =     useRef<number | null>(null);
   const hasCentered = useRef(false);
@@ -229,11 +286,19 @@ function CapeGuide() {
     [places],
   );
 
+  const matchesQuery = useCallback((place: Place, q: string) => {
+    const term = q.trim().toLowerCase();
+    if (!term) return true;
+    const haystack = `${place.name} ${place.formatted_address ?? ''} ${place.category}`.toLowerCase();
+    if (haystack.includes(term)) return true;
+    const categoryWords = place.category.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/);
+    return categoryWords.some((word) => word.startsWith(term) || term.startsWith(word));
+  }, []);
+
   const visible = useMemo(() => {
     const filtered = places.filter((p) => {
       if (active && p.category !== active) return false;
-      if (query && !`${p.name} ${p.formatted_address ?? ''} ${p.category}`
-        .toLowerCase().includes(query.toLowerCase())) return false;
+      if (!matchesQuery(p, query)) return false;
       if (userLocation && radiusMeters !== null) {
         const d = distanceMeters(userLocation.lat, userLocation.lng, p.lat, p.lng);
         if (d > radiusMeters) return false;
@@ -249,7 +314,23 @@ function CapeGuide() {
     }
 
     return filtered;
-  }, [active, places, query, userLocation, radiusMeters]);
+  }, [active, places, query, userLocation, radiusMeters, matchesQuery]);
+
+  // Search dropdown shows ALL matches (ignores radius so users can find far places too)
+  const sortedResults = useMemo(() => {
+    const list = places.filter((p) =>
+      (!active || p.category === active) && matchesQuery(p, query)
+    );
+    if (userLocation) {
+      list.sort((a, b) =>
+        distanceMeters(userLocation.lat, userLocation.lng, a.lat, a.lng) -
+        distanceMeters(userLocation.lat, userLocation.lng, b.lat, b.lng)
+      );
+    } else {
+      list.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return list;
+  }, [places, active, query, userLocation, matchesQuery]);
 
   const selectPlace = useCallback((place: Place) => {
     setSelected(place);
@@ -257,9 +338,11 @@ function CapeGuide() {
   }, []);
 
   const search = () => {
-    const first = visible[0];
+    const first = sortedResults[0];
     if (first) selectPlace(first);
-    setNotice(first ? `${visible.length} place${visible.length === 1 ? '' : 's'} found` : 'No places found');
+    setNotice(first
+      ? `${sortedResults.length} place${sortedResults.length === 1 ? '' : 's'} found`
+      : 'No places found');
   };
 
   useEffect(
@@ -280,6 +363,7 @@ function CapeGuide() {
       hasCentered.current = false;
       setTracking(false);
       setUserLocation(null);
+      setRouteTarget(null);
       setNotice('Live location turned off.');
       return;
     }
@@ -305,6 +389,12 @@ function CapeGuide() {
     );
   };
 
+  const getDirections = (place: Place) => {
+    setRouteTarget(place);
+    if (!tracking) locate();
+    setNotice(`Getting road directions to ${place.name}...`);
+  };
+
   const clearFilter = () => {
     setRadiusMeters(null);
     setNotice('Showing all services.');
@@ -322,6 +412,7 @@ function CapeGuide() {
           mapRef={mapRef}
           userLocation={userLocation}
           radiusMeters={radiusMeters}
+          routeTarget={routeTarget}
         />
 
         <header className="masthead">
@@ -333,11 +424,18 @@ function CapeGuide() {
           <span className="glass"><Search size={19} /></span>
           <input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && search()}
+            onChange={(e) => { setQuery(e.target.value); setResultsOpen(true); }}
+            onFocus={() => query.trim() && setResultsOpen(true)}
+            onBlur={() => setTimeout(() => setResultsOpen(false), 150)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { search(); setResultsOpen(false); }
+              if (e.key === 'Escape') setResultsOpen(false);
+            }}
             placeholder="Search for a place or service..."
           />
-          <button className="search-button" onClick={search}>Search</button>
+          <button className="search-button" onClick={() => { search(); setResultsOpen(false); }}>
+            Search
+          </button>
           <button
             className={`locate${tracking ? ' active' : ''}`}
             title={tracking ? 'Stop live location' : 'Show my live location'}
@@ -346,6 +444,54 @@ function CapeGuide() {
             <LocateFixed size={17} />
           </button>
         </section>
+
+        {resultsOpen && query.trim() && (
+          <div className="search-results" onMouseDown={(e) => e.preventDefault()}>
+            {sortedResults.length === 0 ? (
+              <div className="search-results-empty">No places found</div>
+            ) : (
+              sortedResults.slice(0, 20).map((place) => (
+                <div
+                  key={place.id}
+                  className="search-result-row"
+                  onClick={() => {
+                    selectPlace(place);
+                    setQuery(place.name);
+                    setResultsOpen(false);
+                  }}
+                >
+                  <span
+                    className="search-result-icon"
+                    style={{ background: categoryColor(place.category) }}
+                  >
+                    {categoryIcon(place.category, 14)}
+                  </span>
+                  <div className="search-result-info">
+                    <strong>{place.name}</strong>
+                    <span>
+                      {place.category}
+                      {userLocation
+                        ? ` · ${formatDistance(distanceMeters(userLocation.lat, userLocation.lng, place.lat, place.lng))} away`
+                        : ''}
+                    </span>
+                  </div>
+                  <button
+                    className="search-result-directions"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      getDirections(place);
+                      setQuery(place.name);
+                      setResultsOpen(false);
+                    }}
+                  >
+                    <Navigation size={13} />
+                    Directions
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        )}
 
         {loading && <div className="notice">Loading services...</div>}
         {error && <div className="notice">{error}</div>}
@@ -377,7 +523,7 @@ function CapeGuide() {
               <X size={18} />
             </button>
             <div className="service-title">
-              <span className="service-icon" style={{ background: categories.find((c) => c.name === selected.category)?.color }}>
+              <span className="service-icon" style={{ background: categoryColor(selected.category) }}>
                 {categoryIcon(selected.category, 18)}
               </span>
               <div>
@@ -393,14 +539,16 @@ function CapeGuide() {
               {selected.wheelchair && <p><Accessibility size={17} />Wheelchair access: {selected.wheelchair}</p>}
             </div>
             <div className="service-actions">
-              <button className="directions" onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${selected.lat},${selected.lng}`, '_blank', 'noopener,noreferrer')}>
+              <button className="directions" onClick={() => getDirections(selected)}>
                 <Navigation size={14} /> Get Directions
               </button>
               <button
-                className={saved.includes(selected.name) ? 'saved' : ''}
-                onClick={() => setSaved(saved.includes(selected.name) ? saved.filter((name) => name !== selected.name) : [...saved, selected.name])}
+                className={saved.includes(selected.id) ? 'saved' : ''}
+                onClick={() => setSaved(saved.includes(selected.id)
+                  ? saved.filter((id) => id !== selected.id)
+                  : [...saved, selected.id])}
               >
-                <Bookmark size={15} /> {saved.includes(selected.name) ? 'Saved' : 'Save'}
+                <Bookmark size={15} /> {saved.includes(selected.id) ? 'Saved' : 'Save'}
               </button>
             </div>
           </section>
@@ -458,7 +606,7 @@ function CapeGuide() {
 
 function ProtectedDashboard() {
   const accessToken = localStorage.getItem('servicefinder_access_token');
-  return accessToken ? <Dashboard /> : <Navigate to="/login" replace />;
+  return accessToken ? <CapeGuide /> : <Navigate to="/login" replace />;
 }
 
 export default function App() {
