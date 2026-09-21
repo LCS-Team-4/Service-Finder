@@ -7,6 +7,7 @@ import accidentRoutes from './routes/accidentRoutes';
 import authRoutes from './routes/authRoutes';
 import adminRoutes from './routes/adminRoutes';
 import { importServices } from './api/geoapify/client';
+import { importTrafficIncidents } from './api/tomtom/client';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 
 const app = express();
@@ -29,6 +30,19 @@ if (importIntervalMs > 0) {
 	setInterval(() => {
 		importServices().catch((error) => console.error('[import] failed', error));
 	}, importIntervalMs);
+}
+
+// Traffic incidents are a "present" snapshot, so they are refreshed on an interval.
+// The importer's own lock returns { skipped: true } if a run is still in flight.
+const trafficImportIntervalMs = Number(process.env.TRAFFIC_IMPORT_INTERVAL_MS || 0);
+if (process.env.AUTO_IMPORT_TRAFFIC === 'true') {
+	importTrafficIncidents().catch((error) => console.error('[import] initial traffic import failed', error));
+}
+
+if (trafficImportIntervalMs > 0) {
+	setInterval(() => {
+		importTrafficIncidents().catch((error) => console.error('[import] traffic import failed', error));
+	}, trafficImportIntervalMs);
 }
 
 const PORT = process.env.PORT || 5000;
