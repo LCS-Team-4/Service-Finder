@@ -1,3 +1,5 @@
+import type { TrafficIncident } from '../types/traffic.types';
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
 type ApiError = { error?: string };
@@ -33,6 +35,12 @@ export type AuthResponse = {
   session?: { access_token: string; refresh_token: string };
   needsEmailConfirmation?: boolean;
 };
+
+export async function getTrafficIncidents(): Promise<TrafficIncident[]> {
+  const response = await fetch(`${API_BASE_URL}/traffic-incidents`);
+  if (!response.ok) throw new Error(`Unable to load traffic incidents (${response.status})`);
+  return response.json() as Promise<TrafficIncident[]>;
+}
 
 export function loginRequest(email: string, password: string) {
   return request<AuthResponse>('/auth/login', {

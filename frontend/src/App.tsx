@@ -21,6 +21,7 @@ declare const L: any;
 type Category = string;
 type Place = Omit<Service, 'category'> & { category: Category; lat: number; lng: number };
 type CategoryItem = { name: Category; color: string };
+type UserLocation = { lat: number; lng: number; accuracy: number };
 
 const categoryColors = ['#b94b3c', '#4f876f', '#cb8c38', '#3b77a2', '#375f93', '#81528d', '#77909c', '#815c54', '#bd6240', '#75664b', '#a45b83', '#847337', '#43858a'];
 const categoryColor = (category: string) =>
@@ -85,17 +86,21 @@ const categoryIcon = (category: Category, size = 14) => {
 };
 
 function LeafletMap({
-  places, selected, onSelect, mapRef, userPosition, radiusMeters,
+  places, selected, onSelect, mapRef,
+  userLocation, radiusMeters,
 }: {
   places: Place[];
   selected: Place | null;
   onSelect: (place: Place) => void;
   mapRef: React.MutableRefObject<any>;
-  userPosition: [number, number] | null;
-  radiusMeters: number;
+  userLocation: UserLocation | null;
+  radiusMeters: number | null;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const layer = useRef<any>(null);
+  const userMarker = useRef<any>(null);
+  const accuracyCircle = useRef<any>(null);
+  const radiusCircle = useRef<any>(null);
 
   useEffect(() => {
     if (!root.current || !L) return;
@@ -126,27 +131,73 @@ function LeafletMap({
       marker.bindTooltip(`<strong>${place.name}</strong><br>${place.category}`, { direction: 'top', offset: [0, -38] });
       marker.on('click', () => onSelect(place));
     });
-    if (places.length > 0 && !userPosition) {
+    // Only auto-fit if the user hasn't activated tracking/radius
+    if (places.length > 0 && !userLocation) {
       mapRef.current?.fitBounds(
         L.latLngBounds(places.map((place) => [place.lat, place.lng])),
         { padding: [48, 48], maxZoom: 12 },
       );
     }
-  }, [places, selected, onSelect, userPosition]);
+  }, [places, selected, onSelect, userLocation]);
 
+  // User position dot + accuracy circle
   useEffect(() => {
-    if (!mapRef.current || !userPosition) return;
     const map = mapRef.current;
-    const circle = L.circle(userPosition, {
-      radius: radiusMeters,
-      color: '#005a8a',
-      weight: 1,
-      fillColor: '#08aef0',
-      fillOpacity: 0.08,
-      interactive: false,
-    }).addTo(map);
-    return () => map.removeLayer(circle);
-  }, [userPosition, radiusMeters, mapRef]);
+    if (!map || !L) return;
+
+    if (!userLocation) {
+      if (userMarker.current) { map.removeLayer(userMarker.current); userMarker.current = null; }
+      if (accuracyCircle.current) { map.removeLayer(accuracyCircle.current); accuracyCircle.current = null; }
+      return;
+    }
+
+    const { lat, lng, accuracy } = userLocation;
+    if (!userMarker.current) {
+      const icon = L.divIcon({
+        className: 'user-location-wrap',
+        html: '<span class="user-location-pulse"></span><span class="user-location-dot"></span>',
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+      });
+      userMarker.current = L.marker([lat, lng], { icon, zIndexOffset: 1000 }).addTo(map);
+      accuracyCircle.current = L.circle([lat, lng], {
+        radius: accuracy,
+        color: '#22c55e',
+        weight: 1,
+        fillColor: '#22c55e',
+        fillOpacity: 0.12,
+        interactive: false,
+      }).addTo(map);
+    } else {
+      userMarker.current.setLatLng([lat, lng]);
+      accuracyCircle.current.setLatLng([lat, lng]);
+      accuracyCircle.current.setRadius(accuracy);
+    }
+  }, [userLocation, mapRef]);
+
+  // Radius filter circle
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !L) return;
+    if (!userLocation || radiusMeters === null) {
+      if (radiusCircle.current) { map.removeLayer(radiusCircle.current); radiusCircle.current = null; }
+      return;
+    }
+    const center: [number, number] = [userLocation.lat, userLocation.lng];
+    if (!radiusCircle.current) {
+      radiusCircle.current = L.circle(center, {
+        radius: radiusMeters,
+        color: '#005a8a',
+        weight: 1,
+        fillColor: '#08aef0',
+        fillOpacity: 0.08,
+        interactive: false,
+      }).addTo(map);
+    } else {
+      radiusCircle.current.setLatLng(center);
+      radiusCircle.current.setRadius(radiusMeters);
+    }
+  }, [userLocation, radiusMeters, mapRef]);
 
   return <div className="leaflet-map" ref={root} />;
 }
@@ -160,9 +211,12 @@ function CapeGuide() {
   const [aboutOpen,   setAboutOpen] =   useState(false);
   const [legendOpen,  setLegendOpen] =  useState(false);
   const [saved,       setSaved] =       useState<string[]>([]);
-  const [userPosition, setUserPosition] = useState<[number, number] | null>(null);
-  const [radiusMeters, setRadiusMeters] = useState(2000);
+  const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
+  const [tracking,    setTracking] =    useState(false);
+  const [radiusMeters, setRadiusMeters] = useState<number | null>(2000);
   const mapRef =      useRef<any>(null);
+  const watchId =     useRef<number | null>(null);
+  const hasCentered = useRef(false);
 
   const places = useMemo(
     () => services.map(toPlace).filter((place): place is Place => place !== null),
@@ -180,22 +234,22 @@ function CapeGuide() {
       if (active && p.category !== active) return false;
       if (query && !`${p.name} ${p.formatted_address ?? ''} ${p.category}`
         .toLowerCase().includes(query.toLowerCase())) return false;
-      if (userPosition) {
-        const d = distanceMeters(userPosition[0], userPosition[1], p.lat, p.lng);
+      if (userLocation && radiusMeters !== null) {
+        const d = distanceMeters(userLocation.lat, userLocation.lng, p.lat, p.lng);
         if (d > radiusMeters) return false;
       }
       return true;
     });
 
-    if (userPosition) {
+    if (userLocation && radiusMeters !== null) {
       filtered.sort((a, b) =>
-        distanceMeters(userPosition[0], userPosition[1], a.lat, a.lng) -
-        distanceMeters(userPosition[0], userPosition[1], b.lat, b.lng)
+        distanceMeters(userLocation.lat, userLocation.lng, a.lat, a.lng) -
+        distanceMeters(userLocation.lat, userLocation.lng, b.lat, b.lng)
       );
     }
 
     return filtered;
-  }, [active, places, query, userPosition, radiusMeters]);
+  }, [active, places, query, userLocation, radiusMeters]);
 
   const selectPlace = useCallback((place: Place) => {
     setSelected(place);
@@ -208,21 +262,52 @@ function CapeGuide() {
     setNotice(first ? `${visible.length} place${visible.length === 1 ? '' : 's'} found` : 'No places found');
   };
 
+  useEffect(
+    () => () => {
+      if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
+    },
+    [],
+  );
+
   const locate = () => {
     if (!navigator.geolocation) {
-      setNotice('Geolocation is not available on this device.');
+      setNotice('Geolocation is not supported on this device.');
       return;
     }
-    navigator.geolocation.getCurrentPosition(
+    if (tracking) {
+      if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
+      watchId.current = null;
+      hasCentered.current = false;
+      setTracking(false);
+      setUserLocation(null);
+      setNotice('Live location turned off.');
+      return;
+    }
+    setTracking(true);
+    setNotice('Getting your live location...');
+    watchId.current = navigator.geolocation.watchPosition(
       (pos) => {
-        const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
-        setUserPosition(coords);
-        mapRef.current?.flyTo(coords, 14, { animate: true, duration: 0.7 });
-        setNotice(`Showing services within ${radiusMeters / 1000} km.`);
+        const { latitude, longitude, accuracy } = pos.coords;
+        setUserLocation({ lat: latitude, lng: longitude, accuracy });
+        if (!hasCentered.current) {
+          mapRef.current?.flyTo([latitude, longitude], 15, { animate: true, duration: 0.7 });
+          hasCentered.current = true;
+        }
+        setNotice(radiusMeters === null
+          ? 'Showing your live location.'
+          : `Showing services within ${radiusMeters / 1000} km.`);
       },
-      () => setNotice('We could not access your location.'),
-      { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 },
+      () => {
+        setNotice('We could not access your location.');
+        setTracking(false);
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
     );
+  };
+
+  const clearFilter = () => {
+    setRadiusMeters(null);
+    setNotice('Showing all services.');
   };
 
   return (
@@ -235,7 +320,7 @@ function CapeGuide() {
           selected={selected}
           onSelect={selectPlace}
           mapRef={mapRef}
-          userPosition={userPosition}
+          userLocation={userLocation}
           radiusMeters={radiusMeters}
         />
 
@@ -253,7 +338,11 @@ function CapeGuide() {
             placeholder="Search for a place or service..."
           />
           <button className="search-button" onClick={search}>Search</button>
-          <button className="locate" title="Use my location" onClick={locate}>
+          <button
+            className={`locate${tracking ? ' active' : ''}`}
+            title={tracking ? 'Stop live location' : 'Show my live location'}
+            onClick={locate}
+          >
             <LocateFixed size={17} />
           </button>
         </section>
@@ -262,7 +351,7 @@ function CapeGuide() {
         {error && <div className="notice">{error}</div>}
         {notice && !loading && <div className="notice">{notice}</div>}
 
-        {userPosition && (
+        {userLocation && (
           <div className="radius-control">
             {[1000, 2000, 5000, 10000, 25000].map((r) => (
               <button
@@ -274,10 +363,8 @@ function CapeGuide() {
               </button>
             ))}
             <button
-              onClick={() => {
-                setUserPosition(null);
-                setNotice('Showing all services.');
-              }}
+              className={radiusMeters === null ? 'active' : ''}
+              onClick={clearFilter}
             >
               All
             </button>
