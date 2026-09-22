@@ -56,7 +56,7 @@ export function resetPasswordRequest(accessToken: string, password: string) {
 }
 
 export async function getServices(): Promise<Service[]> {
-	const response = await fetch(`${API_BASE_URL}/services?limit=500`);
+	const response = await fetch(`${API_BASE_URL}/services?limit=1000`);
 	if (!response.ok) throw new Error(`Unable to load services (${response.status})`);
 	return response.json() as Promise<Service[]>;
 }

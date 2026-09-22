@@ -1,11 +1,77 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, MapPinned, Minus, Plus, X } from 'lucide-react';
 import LeafletMap from '../components/Map/LeafletMap';
 import GuideSearch from '../components/SearchBar/GuideSearch';
 import ServicePopup from '../components/ServiceCard/ServicePopup';
 import { CategoryIcon } from '../components/common/CategoryIcon';
+import { useTrafficIncidents } from '../hooks/useTrafficIncidents';
+import { useServices } from '../hooks/useServices';
 import { categories, places } from '../services/guideData';
 import { Category, Place } from '../types/guide.types';
+import type { Service } from '../types/service.types';
+
+function parseServiceLocation(location: Service['location']): [number, number] | null {
+	if (location && typeof location === 'object' && Array.isArray(location.coordinates)) {
+		const [lng, lat] = location.coordinates.map(Number);
+		return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
+	}
+	if (Array.isArray(location)) {
+		const [lng, lat] = location.map(Number);
+		return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
+	}
+	if (typeof location !== 'string') return null;
+	const point = location.match(/POINT\s*\(\s*([-\d.]+)\s*[,\s]+\s*([-\d.]+)\s*\)/i);
+	if (point) return [Number(point[2]), Number(point[1])];
+	if (/^[0-9a-f]+$/i.test(location) && location.length >= 42) {
+		try {
+			const bytes = new Uint8Array(location.match(/.{2}/g)!.map((pair) => parseInt(pair, 16)));
+			const littleEndian = bytes[0] === 1;
+			const view = new DataView(bytes.buffer);
+			const type = view.getUint32(1, littleEndian);
+			if ((type & 0xff) === 1) {
+				const offset = type & 0x20000000 ? 9 : 5;
+				const lng = view.getFloat64(offset, littleEndian);
+				const lat = view.getFloat64(offset + 8, littleEndian);
+				return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
+			}
+		} catch {
+			return null;
+		}
+	}
+	try {
+		return parseServiceLocation(JSON.parse(location) as Service['location']);
+	} catch {
+		return null;
+	}
+}
+
+function serviceCategory(service: Service): Category | null {
+	const source = `${service.category?.name ?? ''} ${service.category?.slug ?? ''} ${service.type ?? ''}`.toLowerCase();
+	const aliases: Partial<Record<Category, string[]>> = {
+		'Hospitals': ['hospital'],
+		'Police Stations': ['police'],
+		'Fire Stations': ['fire station', 'firestation'],
+		'Schools / Universities': ['school', 'university', 'college'],
+		'Home Affairs': ['home affairs', 'government'],
+	};
+	return categories.find((item) => {
+		const name = item.name.toLowerCase();
+		return source.includes(name) || source.includes(name.endsWith('s') ? name.slice(0, -1) : name) || aliases[item.name]?.some((alias) => source.includes(alias));
+	})?.name ?? null;
+}
+
+function serviceToPlace(service: Service): Place | null {
+	const coordinates = parseServiceLocation(service.location);
+	const category = serviceCategory(service);
+	if (!coordinates || !category) return null;
+	return {
+		name: service.name,
+		category,
+		area: service.formatted_address?.split(',')[0] ?? category,
+		lat: coordinates[0],
+		lng: coordinates[1],
+	};
+}
 
 export default function Dashboard() {
 	const [query, setQuery] = useState('');
@@ -15,14 +81,21 @@ export default function Dashboard() {
 	const [aboutOpen, setAboutOpen] = useState(false);
 	const [legendOpen, setLegendOpen] = useState(false);
 	const [saved, setSaved] = useState<string[]>([]);
+	const { incidents } = useTrafficIncidents();
+	const { services, error: servicesError } = useServices();
 	const mapRef = useRef<any>(null);
-	const visible = useMemo(() => places.filter((place) => (!active || place.category === active) && `${place.name} ${place.area} ${place.category}`.toLowerCase().includes(query.toLowerCase())), [active, query]);
+	const allPlaces = useMemo(() => {
+		const apiPlaces = services.map(serviceToPlace).filter((place): place is Place => place !== null);
+		return apiPlaces.length > 0 ? apiPlaces : places;
+	}, [services]);
+	const visible = useMemo(() => allPlaces.filter((place) => (!active || place.category === active) && `${place.name} ${place.area} ${place.category}`.toLowerCase().includes(query.toLowerCase())), [active, allPlaces, query]);
 	const selectPlace = useCallback((place: Place) => { setSelected(place); mapRef.current?.flyTo([place.lat, place.lng], 15, { animate: true, duration: 0.7 }); }, []);
 	const search = () => { const first = visible[0]; if (first) selectPlace(first); setNotice(first ? `${visible.length} place${visible.length === 1 ? '' : 's'} found` : 'No places found'); };
 	const locate = () => navigator.geolocation?.getCurrentPosition((position) => { mapRef.current?.flyTo([position.coords.latitude, position.coords.longitude], 14); setNotice('Showing your current location.'); }, () => setNotice('We could not access your location.'));
+	useEffect(() => { if (servicesError) setNotice('Showing sample services while the full service list is unavailable.'); }, [servicesError]);
 
 	return <main className="guide-shell">
-		<LeafletMap places={visible} onSelect={selectPlace} mapRef={mapRef} />
+		<LeafletMap places={visible} incidents={incidents} onSelect={selectPlace} mapRef={mapRef} />
 		<header className="masthead"><h1>The Cape Guide</h1><p>Find. Navigate. Connect.</p></header>
 		<GuideSearch query={query} onQueryChange={setQuery} onSearch={search} onLocate={locate} />
 		{notice && <div className="notice">{notice}</div>}

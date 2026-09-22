@@ -8,7 +8,7 @@ export async function getServices(req: Request, res: Response, next: NextFunctio
 		const search = typeof req.query.q === 'string' ? req.query.q.trim() : undefined
 		const requestedLimit = Number(req.query.limit ?? 100)
 		const limit = Number.isInteger(requestedLimit)
-			? Math.min(Math.max(requestedLimit, 1), 500)
+			? Math.min(Math.max(requestedLimit, 1), 1000)
 			: 100
 
 		let query = supabase
