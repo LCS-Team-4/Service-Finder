@@ -9,6 +9,8 @@ these files, update the matching section here.
 | | |
 |---|---|
 | Scope | Backend integrations (Geoapify, TomTom, Supabase) + browser-side APIs (OSM tiles, Google Maps link, CDN assets) |
+10. [Change history and decisions](#10-change-history-and-decisions)
+11. [API route reference (Express)](#11-api-route-reference-express)
 | Backend base URL | `http://localhost:5000` (`PORT` in `backend/.env`) |
 | Frontend base URL | `http://localhost:5173` (Vite dev server) |
 | Frontend API base | `frontend/src/services/api.ts:4-5` — `VITE_API_BASE_URL` (or `http://localhost:5000/api`), normalised so it always ends in `/api` |
@@ -620,3 +622,143 @@ Do not reintroduce tiling on top of `replaceInSupabase`. In order of effort:
   `useTrafficIncidents` — that would cost zero provider quota, since it only reads our own API.
 - **Verify a scheduler change with two timestamps**, not one: note `imported_at` from
   `GET /api/traffic-incidents`, wait past the interval, and confirm it advanced (see section 6).
+
+---
+
+## 11. API route reference (Express)
+
+Every route the backend serves. There are **13 routes across 4 routers**, plus two catch-all handlers.
+Mount points come from `backend/src/server.ts:17-22`.
+
+Base URL: `http://localhost:5000` (`PORT`). All responses are JSON. `cors()` is registered with no options, so
+**every origin is allowed**. There is no request logging and no rate limiting on our own API — the only rate limiting
+in the project is outbound (section 3.8).
+
+### 11.1 Summary
+
+| Method | Path | Auth | Handler | Success | Called by frontend? |
+|---|---|---|---|---|---|
+| `GET` | `/api/services` | none | `getServices` | `200` array of services (each with joined `category`) | ✅ `useServices` |
+| `GET` | `/api/services/:externalId` | none | `getServiceDetails` | `200` service or `404` | ❌ (`getServiceDetails()` is unused) |
+| `PATCH` | `/api/services/:id` | Supabase JWT **+ admin role** | `updateService` | `200 { data }` | ❌ |
+| `GET` | `/api/traffic-incidents` | none | `getTrafficIncidents` | `200` bare array | ✅ `useTrafficIncidents` |
+| `GET` | `/api/traffic-incidents/:externalId` | none | `getAccidentDetails` | `200` or `404` | ❌ |
+| `POST` | `/api/auth/login` | none | `login` | `200 { user, session }` | ✅ `pages/Login.tsx` |
+| `POST` | `/api/auth/signup` | none | `signup` | `201 { user, needsEmailConfirmation }` | ✅ `pages/Signup.tsx` |
+| `POST` | `/api/auth/forgot-password` | none | `forgotPassword` | `200 { message }` | ✅ `pages/ForgotPassword.tsx` |
+| `POST` | `/api/auth/reset-password` | none | `resetPassword` | `200 { message }` | ✅ `pages/ResetPassword.tsx` |
+| `POST` | `/api/admin/import/services` | `x-admin-import-token` | `importServices` | `200 { imported, skipped }` | ❌ |
+| `POST` | `/api/admin/import/accidents` | `x-admin-import-token` | `importTrafficIncidents` | `200 { imported, skipped }` | ❌ |
+| `POST` | `/api/admin/import/tomtom/services` | `x-admin-import-token` | `importTomTomServices` | `200 { fetched, inserted, enriched, skipped }` | ❌ |
+| `POST` | `/api/admin/sync/service-categories` | `x-admin-import-token` | `backfillServiceCategories` | `200 { updated }` | ❌ |
+| `*` | anything else | — | `notFoundHandler` | `404 { error, path, method }` | — |
+
+There is also a commented-out `POST /api/services/suggest` in `serviceRoutes.ts:10` (no handler implemented).
+
+### 11.2 `/api/services` — `routes/serviceRoutes.ts`
+
+**`GET /api/services`** — the map's data source.
+
+| Query param | Type | Default | Behaviour |
+|---|---|---|---|
+| `limit` | integer | `100` | Clamped to **1–1000**; non-integers fall back to 100 |
+| `type` | string | — | Filters on the joined category slug: `.eq('category.slug', type)` |
+| `q` | string | — | Case-insensitive name search: `.ilike('name', '%q%')` |
+
+Selects `*, category:service_categories(id,name,slug,parent_id)` and returns an array (empty array, never `null`).
+The frontend requests `?limit=1000` and does all category/search filtering client-side.
+
+**`GET /api/services/:externalId`** — single service by its provider id (`external_id`), with the same category join.
+`404 { message: 'Service not found' }` when there is no match. Currently unused by the frontend.
+
+**`PATCH /api/services/:id`** — admin edit. Requires `Authorization: Bearer <supabase access token>` where
+`app_metadata.role === 'admin'`.
+
+- Body: any of `name`, `type`, `formatted_address`, `location`, `opening_hours`, `website`, `phone`, `wheelchair`,
+  `sourcename`. Only keys that are not `undefined` are applied.
+- Codes: `401` no/invalid token · `403` not admin · `404` service not found · `400` no fields supplied ·
+  `200 { data }` on success.
+
+### 11.3 `/api/traffic-incidents` — `routes/accidentRoutes.ts`
+
+**`GET /api/traffic-incidents`** — the whole current snapshot, no query parameters. Returns a **bare array**
+(not wrapped in `{ data }`) of `id, icon_category, magnitude_of_delay, from_road, to_road, length_m, delay_seconds,
+road_numbers, description, geometry, imported_at`, ordered by `imported_at desc`. Anything the browser needs to filter
+(e.g. by `icon_category`) is done client-side, which is why the legend filter costs no API calls.
+
+**`GET /api/traffic-incidents/:externalId`** — ⚠️ **broken by design:** `fetchAccidentDetails()` looks the id up in the
+
+### 11.4 `/api/admin` — `routes/adminRoutes.ts`
+
+All four routes sit behind `requireAdminImportToken` (`middleware/adminImportAuth.ts`): the request header
+`x-admin-import-token` must exactly equal `ADMIN_IMPORT_TOKEN` from `backend/.env`, otherwise **`401 { error: 'Unauthorized' }`**.
+If the env var is unset every request is rejected as well — there is no default token. Handler failures are logged
+(`IMPORT ERROR:`, `ACCIDENT IMPORT ERROR:`, `TOMTOM SERVICE IMPORT ERROR:`) and forwarded via `next(error)` to the shared
+error handler (§11.6).
+
+**`POST /api/admin/import/services`** — runs the Geoapify Places import (§3.1). Response `{ imported, skipped }`;
+`skipped: true` means the single-flight lock saw another run already in progress. Costs up to **24 Geoapify requests**.
+Never scheduled — manual only.
+
+**`POST /api/admin/import/accidents`** — runs the TomTom Incident Details import (§3.2). Response `{ imported, skipped }`.
+Costs exactly **1 TomTom request**. This is the same function the 30-minute scheduler calls, so a manual call is simply
+"the tick, on demand" — the cheap way to get fresher traffic before a demo.
+
+**`POST /api/admin/import/tomtom/services`** — runs the TomTom Search enrichment (§3.3). Response
+`{ fetched, inserted, enriched, skipped }`. Costs **up to 324 TomTom Search requests** — the largest quota spend in the
+project (§7), which is why it must stay manual.
+
+**`POST /api/admin/sync/service-categories`** — runs `backfillServiceCategories()` (`services/categoryService.ts`), which
+re-links existing services to the canonical category tree after `service_categories` definitions change. Response
+`{ updated }`. Costs Supabase calls only (throttled at 5/s).
+
+Example (PowerShell):
+
+```powershell
+Invoke-RestMethod 'http://localhost:5000/api/admin/import/accidents' -Method Post `
+  -Headers @{ 'x-admin-import-token' = $env:ADMIN_IMPORT_TOKEN }
+```
+
+### 11.5 `/api/auth` — `routes/authRoutes.ts`
+
+Four POST-only routes that proxy Supabase Auth through the service-role client. No middleware; validation is inline and
+all payloads are JSON.
+
+**`POST /api/auth/login`** — body `{ email, password }` → `supabase.auth.signInWithPassword`.
+`400` missing fields · `401 { error }` invalid credentials (Supabase's message passes through) ·
+`200 { user: { id, email }, session }` on success.
+
+**`POST /api/auth/signup`** — body `{ firstName|name, lastName|name, phoneNumber, email, password }` (all five values
+required; the controller splits a single `name` into first/last when the explicit fields are absent). Two modes,
+switched by `SUPABASE_AUTO_CONFIRM_USERS === 'true'`:
+
+- auto-confirm: `supabase.auth.admin.createUser(..., email_confirm: true)` — service role, no confirmation email;
+- normal: `supabase.auth.signUp(...)` — Supabase sends the confirmation email.
+
+A `profiles` row (`first_name, last_name, phone_number, email, role: 'user'`) is inserted afterwards; **if that insert
+fails the freshly created auth user is deleted** so auth and profiles never drift apart.
+`400` missing fields or profile failure · `429` when Supabase rate-limits confirmation emails
+(`over_email_send_rate_limit` → friendly retry message) · `201 { user, needsEmailConfirmation }` on success
+(`needsEmailConfirmation` is true when no session came back).
+
+**`POST /api/auth/forgot-password`** — body `{ email }` → `supabase.auth.resetPasswordForEmail`, with the email link
+redirected to `origin/reset-password` when the origin is a localhost:5173 dev server, else `APP_BASE_URL/reset-password`.
+Answers `200 { message: 'If an account exists…' }` for any valid input — it deliberately does not reveal whether the
+address is registered. `400` missing email · `429` email rate limit.
+
+**`POST /api/auth/reset-password`** — body `{ accessToken, password }` (the token comes from the reset email link;
+password ≥ 6 chars). The token is verified with `supabase.auth.getUser`, then the password is set with
+`supabase.auth.admin.updateUserById`. `400` missing/short password or update failure · `401` token missing or expired ·
+`200 { message: 'Password updated successfully.' }`.
+
+### 11.6 Fallbacks and shared error handling
+
+- `notFoundHandler` (`middleware/errorHandler.ts`) — any unmatched path →
+  **`404 { error: 'Route not found', path, method }`**.
+- `errorHandler` — any `next(error)`: **`502`** when the thrown value is an object with a `message` (treated as an
+  upstream/Supabase failure; Supabase `code`/`hint` are surfaced as `code`/`details` in the body), otherwise
+  **`500 { error: <message> }`**. Everything is logged as `REQUEST ERROR:`. Note there is no request access log —
+  `requestLogger.ts` is a 0-byte placeholder (§8.9).
+
+**`services`** table (`models/accident.ts`), so it can never return an incident. It answers `404 { message: 'Service not
+found' }` for any incident id. No client calls it; see 8.3.
