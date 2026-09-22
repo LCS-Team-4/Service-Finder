@@ -61,7 +61,8 @@ export default function Home() {
   const [legendOpen, setLegendOpen] = useState(false);
   const [saved, setSaved] = useState<string[]>([]);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
-  const [tracking, setTracking] = useState(false);
+    const [tracking, setTracking] = useState(false);
+    const [routeTarget, setRouteTarget] = useState<Place | null>(null);
 
   const mapRef = useRef<any>(null);
   const watchId = useRef<number | null>(null);
@@ -155,7 +156,8 @@ export default function Home() {
           onSelect={selectPlace}
           mapRef={mapRef}
           userLocation={userLocation}
-          incidents={incidents}
+        incidents={incidents}
+        routeTarget={routeTarget}
         />
 
         <header className="masthead">
@@ -177,12 +179,19 @@ export default function Home() {
 
         {selected && (
           <ServicePopup
-            place={selected}
-            saved={saved.includes(selected.name)}
-            onClose={() => setSelected(null)}
-            onSave={() => toggleSave(selected.name)}
-            onViewDetails={() => setNotice(`More details for ${selected.name} coming soon.`)}
-          />
+                place={selected}
+                saved={saved.includes(selected.name)}
+                onClose={() => {
+                    setSelected(null);
+                    setRouteTarget(null);
+                }}
+                onSave={() => toggleSave(selected.name)}
+                onViewDetails={() => setNotice(`More details for ${selected.name} coming soon.`)}
+                onGetDirections={() => {
+                    setRouteTarget(selected);
+                    setNotice(`Getting road directions to ${selected.name}...`);
+                }}
+                />
         )}
 
         <button className="panel-trigger about-trigger" onClick={() => setAboutOpen(true)}>

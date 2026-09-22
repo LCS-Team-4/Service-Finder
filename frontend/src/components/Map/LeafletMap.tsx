@@ -64,6 +64,7 @@ interface LeafletMapProps {
   mapRef: React.MutableRefObject<any>;
   userLocation: { lat: number; lng: number; accuracy: number } | null;
   incidents: TrafficIncident[];
+  routeTarget: Place | null;
 }
 
 export default function LeafletMap({
@@ -73,12 +74,15 @@ export default function LeafletMap({
   mapRef,
   userLocation,
   incidents,
+  routeTarget,
 }: LeafletMapProps) {
   const root = useRef<HTMLDivElement>(null);
   const layer = useRef<any>(null);
   const incidentLayer = useRef<any>(null);
   const userMarker = useRef<any>(null);
   const accuracyCircle = useRef<any>(null);
+  const routeLine = useRef<any>(null);
+  const lastRouteKey = useRef<string>('');
 
   // 1. Map setup — runs once
   useEffect(() => {
@@ -192,6 +196,90 @@ export default function LeafletMap({
       accuracyCircle.current.setRadius(accuracy);
     }
   }, [userLocation, mapRef]);
+
+  // 5. Directions — fetch a real road path via OSRM and draw it on the map
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !L) return;
+
+    if (!userLocation || !routeTarget) {
+      if (routeLine.current) {
+        map.removeLayer(routeLine.current);
+        routeLine.current = null;
+      }
+      lastRouteKey.current = '';
+      return;
+    }
+
+    const key = `${routeTarget.lat.toFixed(4)},${routeTarget.lng.toFixed(4)}|${userLocation.lat.toFixed(3)},${userLocation.lng.toFixed(3)}`;
+    if (key === lastRouteKey.current && routeLine.current) return;
+    lastRouteKey.current = key;
+
+    const controller = new AbortController();
+    const from = `${userLocation.lng},${userLocation.lat}`;
+    const to = `${routeTarget.lng},${routeTarget.lat}`;
+    const url = `https://router.project-osrm.org/route/v1/driving/${from};${to}?overview=full&geometries=geojson`;
+
+    fetch(url, { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error('Routing request failed');
+        return res.json();
+      })
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        const coords =
+          data?.routes?.[0]?.geometry?.coordinates?.map(
+            (c: [number, number]) => [c[1], c[0]] as [number, number],
+          ) ?? null;
+
+        const latlngs: [number, number][] =
+          coords && coords.length > 1
+            ? coords
+            : [
+                [userLocation.lat, userLocation.lng],
+                [routeTarget.lat, routeTarget.lng],
+              ];
+
+        if (!routeLine.current) {
+          routeLine.current = L.polyline(latlngs, {
+            color: '#1f9450',
+            weight: 5,
+            opacity: 0.9,
+          }).addTo(map);
+        } else {
+          routeLine.current.setLatLngs(latlngs);
+        }
+
+        try {
+          map.fitBounds(L.latLngBounds(latlngs), {
+            padding: [48, 48],
+            maxZoom: 16,
+            animate: true,
+          });
+        } catch {
+          /* ignore invalid bounds */
+        }
+      })
+      .catch((err) => {
+        if (err?.name === 'AbortError') return;
+        const latlngs: [number, number][] = [
+          [userLocation.lat, userLocation.lng],
+          [routeTarget.lat, routeTarget.lng],
+        ];
+        if (!routeLine.current) {
+          routeLine.current = L.polyline(latlngs, {
+            color: '#1f9450',
+            weight: 5,
+            opacity: 0.9,
+            dashArray: '8 10',
+          }).addTo(map);
+        } else {
+          routeLine.current.setLatLngs(latlngs);
+        }
+      });
+
+    return () => controller.abort();
+  }, [userLocation, routeTarget, mapRef]);
 
   return <div className="leaflet-map" ref={root} />;
 }

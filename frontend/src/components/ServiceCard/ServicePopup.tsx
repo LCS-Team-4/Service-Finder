@@ -9,6 +9,7 @@ interface ServicePopupProps {
   onClose: () => void;
   onSave: () => void;
   onViewDetails: () => void;
+  onGetDirections: () => void;
 }
 
 export default function ServicePopup({
@@ -17,9 +18,8 @@ export default function ServicePopup({
   onClose,
   onSave,
   onViewDetails,
+  onGetDirections,
 }: ServicePopupProps) {
-  const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lng}`;
-
   return (
     <section className="service-popup">
       <button className="service-close" aria-label="Close service" onClick={onClose}>
@@ -60,10 +60,7 @@ export default function ServicePopup({
 
       <div className="service-actions">
         <button onClick={onViewDetails}>View Details</button>
-        <button
-          className="directions"
-          onClick={() => window.open(directionsUrl, '_blank', 'noopener,noreferrer')}
-        >
+        <button className="directions" onClick={onGetDirections}>
           <Navigation size={14} />
           Get Directions
         </button>
