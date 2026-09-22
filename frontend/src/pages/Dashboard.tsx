@@ -223,16 +223,9 @@ function LeafletMap({
           routeLine.current.setLatLngs(latlngs);
         }
 
-        // Show the full road path on the map
-        try {
-          map.fitBounds(L.latLngBounds(latlngs), {
-            padding: [48, 48],
-            maxZoom: 16,
-            animate: true,
-          });
-        } catch {
-          /* ignore invalid bounds */
-        }
+        // Zoom in tight on the user's live location — Google Maps "locate me" style —
+        // rather than zooming out to fit the whole route.
+        map.flyTo([userLocation.lat, userLocation.lng], 18, { animate: true, duration: 0.8 });
       })
       .catch((err) => {
         if (err?.name === 'AbortError') return;
@@ -250,6 +243,7 @@ function LeafletMap({
         } else {
           routeLine.current.setLatLngs(latlngs);
         }
+        map.flyTo([userLocation.lat, userLocation.lng], 18, { animate: true, duration: 0.8 });
       });
 
     return () => controller.abort();
@@ -361,11 +355,14 @@ function Dashboard() {
     [],
   );
 
-  // In-map directions: set route target, start live location if needed.
-  // LeafletMap fetches a real road path via OSRM and fits it on the map.
+  // In-map directions: set route target, start live location if needed, and zoom
+  // in tight on the user's live location right away (Google Maps "locate me" style).
   const getDirections = (place: Place) => {
     setRouteTarget(place);
     if (!tracking) locate();
+    if (userLocation) {
+      mapRef.current?.flyTo([userLocation.lat, userLocation.lng], 18, { animate: true, duration: 0.8 });
+    }
     setNotice(`Getting road directions to ${place.name}...`);
   };
 
