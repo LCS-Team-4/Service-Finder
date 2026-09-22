@@ -43,7 +43,7 @@ Free-tier Maps APIs cap daily requests and can throttle or go down. This structu
 - Graceful fallback data + friendly error states in `frontend/src/components/Map` when the API is unavailable or limited.
 - Request counting/logging so the team can see usage trending toward the daily cap.
 
-See `docs/roadblock-notes.md` for the full plan.
+See `docs/api-integration-guide.md` for the full plan, including the diagram of every API call and its trigger.
 
 ## API import flow
 
@@ -56,6 +56,8 @@ API imports should use this sequence:
 Do not call `fetch()` directly for imports or send all mapped rows in one upsert. Add a separate limiter with `setRateLimit()` when introducing another external API.
 
 The service import can be tested with `POST /api/admin/import/services` and the `x-admin-import-token` header matching `ADMIN_IMPORT_TOKEN`. Automatic imports are disabled unless `IMPORT_INTERVAL_MS` is set to a positive value. Both callers use the same import lock, Geoapify limiter, and Supabase batch limiter.
+
+Traffic incidents use a separate admin endpoint, `POST /api/admin/import/accidents`, and a separate interval (`TRAFFIC_IMPORT_INTERVAL_MS`, currently 30 minutes). Because incidents are a live snapshot, a run replaces the whole table (`replaceInSupabase`) instead of upserting. Setting `TRAFFIC_IMPORT_INTERVAL_MS` also triggers one import at boot. See `docs/api-integration-guide.md` for the full picture of which API is called where, how, and when.
 
 ## Getting Started
 1. `cd frontend && npm install`
