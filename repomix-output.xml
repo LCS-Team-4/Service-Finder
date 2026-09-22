@@ -103,21 +103,28 @@ frontend/
         AdminPanel.tsx
       Auth/
         AuthLayout.tsx
+        AuthMap.tsx
+        BrandCompass.tsx
         LoginForm.tsx
         SignupForm.tsx
       common/
         Button.tsx
+        CategoryIcon.tsx
+        IncidentIcon.tsx
         Loader.tsx
         Navbar.tsx
       Dashboard/
         Dashboard.tsx
       Map/
+        LeafletMap.tsx
         MapMarker.tsx
         MapView.tsx
       SearchBar/
+        GuideSearch.tsx
         SearchBar.tsx
       ServiceCard/
         ServiceCard.tsx
+        ServicePopup.tsx
     context/
       AuthContext.tsx
     db/
@@ -138,11 +145,13 @@ frontend/
     services/
       api.ts
       authService.ts
+      guideData.ts
       mapsService.ts
     styles/
       index.css
       variables.css
     types/
+      guide.types.ts
       service.types.ts
       traffic.types.ts
       user.types.ts
@@ -166,6 +175,286 @@ start-demo.bat
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="frontend/src/components/Auth/AuthMap.tsx">
+import { useEffect, useRef } from 'react';
+
+declare const L: any;
+
+/** A deliberately quiet instance of the same Cape Town map used in the guide. */
+function AuthMap() {
+	const mapElement = useRef<HTMLDivElement>(null);
+
+	useEffect(() => {
+		if (!mapElement.current || typeof L === 'undefined') return;
+
+		const map = L.map(mapElement.current, {
+			zoomControl: false,
+			attributionControl: false,
+			zoomSnap: 0.25,
+		}).setView([-33.95, 18.48], 11.25);
+
+		L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+			maxZoom: 19,
+		}).addTo(map);
+
+		return () => map.remove();
+	}, []);
+
+	return <div className="auth-map" ref={mapElement} aria-label="Interactive map of Cape Town" />;
+}
+
+export default AuthMap;
+</file>
+
+<file path="frontend/src/components/Auth/BrandCompass.tsx">
+function BrandCompass() {
+	return (
+		<svg viewBox="0 0 100 100">
+			{/* Outer brass bezel */}
+			<circle cx="50" cy="50" r="47" fill="none" stroke="#3f2410" strokeWidth="3.4" />
+			<circle cx="50" cy="50" r="44.6" fill="none" stroke="#6b4423" strokeWidth="0.8" />
+
+			{/* Degree ticks around the bezel */}
+			<g stroke="#6b4423" strokeLinecap="round">
+				{[0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330].map((angle) => (
+					<line key={`tick-${angle}`} x1="50" y1="6.8" x2="50" y2="9.7" strokeWidth="1.3" transform={`rotate(${angle} 50 50)`} />
+				))}
+				{[0, 90, 180, 270].map((angle) => (
+					<line key={`cardinal-${angle}`} x1="50" y1="5.7" x2="50" y2="9.7" strokeWidth="2.4" transform={`rotate(${angle} 50 50)`} />
+				))}
+			</g>
+
+			{/* Parchment dial */}
+			<circle cx="50" cy="50" r="40" fill="#f0ddb8" stroke="#8b5a2b" strokeWidth="1.3" />
+			<circle cx="50" cy="50" r="36.3" fill="none" stroke="#a97e4a" strokeWidth="0.7" />
+			<ellipse cx="37" cy="39" rx="20" ry="15" fill="#ffffff" opacity="0.1" />
+
+			{/* Cardinal letters on the dial */}
+			<g fontFamily="Georgia, serif" fontSize="11" fontWeight="700" fill="#6b4423" textAnchor="middle">
+				<text x="50" y="19.5">N</text>
+				<text x="50" y="87.5">S</text>
+				<text x="84" y="53.5">E</text>
+				<text x="16" y="53.5">W</text>
+			</g>
+
+			{/* Compass rose */}
+			<g fill="#c28a3b">
+				<circle cx="50" cy="50" r="23" fill="none" stroke="#a97e4a" strokeWidth="0.7" />
+				{[0, 90, 180, 270].map((angle) => (
+					<polygon key={`petal-${angle}`} points="50,29 46.2,44 53.8,44 50,50" opacity="0.95" transform={`rotate(${angle} 50 50)`} />
+				))}
+				{[45, 135, 225, 315].map((angle) => (
+					<polygon key={`half-petal-${angle}`} points="50,36 47.4,44 52.6,44 50,50" opacity="0.8" transform={`rotate(${angle} 50 50)`} />
+				))}
+			</g>
+
+			{/* Magnetic needle (red north, dark south) with center pivot */}
+			<g>
+				<polygon points="50,24 48.7,43 51.3,43 50,50" fill="#b53124" />
+				<polygon points="50,76 48.7,57 51.3,57 50,50" fill="#35200d" />
+				<circle cx="50" cy="50" r="5.2" fill="#2c1b0c" stroke="#6b4423" strokeWidth="0.6" />
+				<circle cx="50" cy="50" r="2.1" fill="#cbb689" />
+			</g>
+		</svg>
+	);
+}
+
+export default BrandCompass;
+</file>
+
+<file path="frontend/src/components/common/CategoryIcon.tsx">
+import { Bus, Flame, GraduationCap, Heart, Hospital, House, Landmark, Library, Pill, Shield, ShoppingBag, Smile, Stethoscope } from 'lucide-react';
+import { Category } from '../../types/guide.types';
+
+export function CategoryIcon({ category, size = 14 }: { category: Category; size?: number }) {
+  const props = { size, strokeWidth: 2.2 };
+  switch (category) {
+    case 'Clinics': return <Stethoscope {...props} />; case 'Libraries': return <Library {...props} />;
+    case 'Shelters': return <House {...props} />; case 'Hospitals': return <Hospital {...props} />;
+    case 'Police Stations': return <Shield {...props} />; case 'Pharmacies': return <Pill {...props} />;
+    case 'Dentists': return <Smile {...props} />; case 'SPCA': return <Heart {...props} />;
+    case 'Fire Stations': return <Flame {...props} />; case 'Home Affairs': return <Landmark {...props} />;
+    case 'Malls': return <ShoppingBag {...props} />; case 'Transport': return <Bus {...props} />;
+    case 'Schools / Universities': return <GraduationCap {...props} />;
+  }
+}
+</file>
+
+<file path="frontend/src/components/common/IncidentIcon.tsx">
+import { Ban, CarFront, CircleAlert, CloudFog, CloudRain, Construction, Snowflake, TrafficCone, TriangleAlert, Wind } from 'lucide-react';
+
+const iconProps = { size: 16, strokeWidth: 2.5 };
+
+export function IncidentIcon({ category }: { category: number | null }) {
+  // TomTom icon categories map to the closest Lucide traffic symbol.
+  switch (category) {
+    case 1: return <CarFront {...iconProps} />;
+    case 2: return <CloudFog {...iconProps} />;
+    case 3: return <TriangleAlert {...iconProps} />;
+    case 4: return <CloudRain {...iconProps} />;
+    case 5: return <Snowflake {...iconProps} />;
+    case 6: return <TrafficCone {...iconProps} />;
+    case 7:
+    case 8: return <Ban {...iconProps} />;
+    case 9: return <Construction {...iconProps} />;
+    case 10: return <Wind {...iconProps} />;
+    default: return <CircleAlert {...iconProps} />;
+  }
+}
+</file>
+
+<file path="frontend/src/components/Map/LeafletMap.tsx">
+import { useEffect, useRef } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { IncidentIcon } from '../common/IncidentIcon';
+import { CategoryIcon } from '../common/CategoryIcon';
+import { categories } from '../../services/guideData';
+import { Place } from '../../types/guide.types';
+import type { TrafficIncident } from '../../types/traffic.types';
+
+declare const L: any;
+
+function parseLineString(geometry: TrafficIncident['geometry']): [number, number][] {
+  if (typeof geometry !== 'string') return [];
+  const match = geometry.match(/LINESTRING\s*\((.*)\)/i);
+  if (match) {
+    return match[1].split(',').map((pair) => {
+      const [lng, lat] = pair.trim().split(/\s+/).map(Number);
+      return [lat, lng] as [number, number];
+    }).filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng));
+  }
+  if (!/^[0-9a-f]+$/i.test(geometry)) return [];
+  const bytes = new Uint8Array(geometry.match(/.{2}/g)!.map((pair) => parseInt(pair, 16)));
+  const littleEndian = bytes[0] === 1;
+  const view = new DataView(bytes.buffer);
+  const type = view.getUint32(1, littleEndian);
+  if ((type & 0xff) !== 2) return [];
+  const offset = type & 0x20000000 ? 9 : 5;
+  const count = view.getUint32(offset, littleEndian);
+  const coordinates: [number, number][] = [];
+  for (let index = 0; index < count; index += 1) {
+    const coordinateOffset = offset + 4 + index * 16;
+    if (coordinateOffset + 16 > bytes.length) break;
+    const lng = view.getFloat64(coordinateOffset, littleEndian);
+    const lat = view.getFloat64(coordinateOffset + 8, littleEndian);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) coordinates.push([lat, lng]);
+  }
+  return coordinates;
+}
+
+export default function LeafletMap({ places, incidents, onSelect, mapRef }: { places: Place[]; incidents: TrafficIncident[]; onSelect: (place: Place) => void; mapRef: React.MutableRefObject<any> }) {
+  const root = useRef<HTMLDivElement>(null);
+  const layer = useRef<any>(null);
+
+  useEffect(() => {
+    if (!root.current || !L) return;
+    const map = L.map(root.current, { zoomControl: false, attributionControl: true }).setView([-33.96, 18.5], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(map);
+    mapRef.current = map;
+    layer.current = L.layerGroup().addTo(map);
+    return () => map.remove();
+  }, [mapRef]);
+
+  useEffect(() => {
+    if (!layer.current) return;
+    layer.current.clearLayers();
+    places.forEach((place) => {
+      const category = categories.find((item) => item.name === place.category)!;
+      const icon = L.divIcon({ className: 'cape-marker-wrap', html: `<div class="cape-marker" style="--marker:${category.color}"><span>${renderToStaticMarkup(<CategoryIcon category={place.category} />)}</span></div>`, iconSize: [34, 42], iconAnchor: [17, 42] });
+      const marker = L.marker([place.lat, place.lng], { icon }).addTo(layer.current);
+      marker.bindTooltip(`<strong>${place.name}</strong><br>${place.category}`, { direction: 'top', offset: [0, -38] });
+      marker.on('click', () => onSelect(place));
+    });
+    incidents.forEach((incident) => {
+      const coordinates = parseLineString(incident.geometry);
+      if (coordinates.length === 0) return;
+      const severity = (incident.magnitude_of_delay ?? 0) >= 4 ? 'traffic' : 'road-works';
+      L.polyline(coordinates, { color: severity === 'traffic' ? '#b5362d' : '#c56a24', weight: 5, opacity: 0.82 }).addTo(layer.current);
+      const iconMarkup = renderToStaticMarkup(<IncidentIcon category={incident.icon_category} />);
+      const icon = L.divIcon({ className: 'traffic-marker-wrap', html: `<div class="traffic-marker ${severity}">${iconMarkup}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
+      const marker = L.marker(coordinates[0], { icon }).addTo(layer.current);
+      marker.bindTooltip(`<strong>${incident.from_road ?? 'Traffic incident'}</strong><br>${incident.description ?? 'Traffic disruption'}`, { direction: 'top' });
+    });
+    if (places.length > 0) {
+      mapRef.current?.fitBounds(places.map((place) => [place.lat, place.lng]), { padding: [40, 40], maxZoom: 12 });
+    }
+  }, [incidents, onSelect, places]);
+
+  return <div className="leaflet-map" ref={root} />;
+}
+</file>
+
+<file path="frontend/src/components/SearchBar/GuideSearch.tsx">
+import { LocateFixed, Search } from 'lucide-react';
+
+export default function GuideSearch({ query, onQueryChange, onSearch, onLocate }: { query: string; onQueryChange: (query: string) => void; onSearch: () => void; onLocate: () => void }) {
+  return <section className="search-panel">
+    <span className="glass"><Search size={19} /></span>
+    <input value={query} onChange={(event) => onQueryChange(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && onSearch()} placeholder="Search for a place or service..." />
+    <button className="search-button" onClick={onSearch}>Search</button>
+    <button className="locate" title="Use my location" onClick={onLocate}><LocateFixed size={17} /></button>
+  </section>;
+}
+</file>
+
+<file path="frontend/src/components/ServiceCard/ServicePopup.tsx">
+import { Bookmark, Clock3, MapPinned, Navigation, Phone, X } from 'lucide-react';
+import { CategoryIcon } from '../common/CategoryIcon';
+import { categories } from '../../services/guideData';
+import { Place } from '../../types/guide.types';
+
+export default function ServicePopup({ place, saved, onClose, onSave, onNotice }: { place: Place; saved: boolean; onClose: () => void; onSave: () => void; onNotice: (message: string) => void }) {
+  const details = { address: place.category === 'SPCA' ? '1 Bird Street, Grassy Park' : `${place.area} service centre, Cape Town`, hours: place.category === 'Hospitals' ? 'Open 24 hours' : '08:00 – 16:30', phone: place.category === 'SPCA' ? '021 700 4158' : '021 400 0000' };
+  const color = categories.find((category) => category.name === place.category)?.color;
+  return <section className="service-popup">
+    <button className="service-close" aria-label="Close service" onClick={onClose}><X size={18} /></button>
+    <div className="service-title"><span className="service-icon" style={{ background: color }}><CategoryIcon category={place.category} size={18} /></span><div><h2>{place.name}</h2><p>{place.category}</p></div></div>
+    <div className="service-info"><p><MapPinned size={17} /><span>{details.address}<br />Cape Town</span></p><p><Clock3 size={17} />{details.hours}</p><p><Phone size={17} />{details.phone}</p></div>
+    <div className="service-actions"><button onClick={() => onNotice(`More details for ${place.name} coming soon.`)}>View Details</button><button className="directions" onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lng}`, '_blank', 'noopener,noreferrer')}><Navigation size={14} />Get Directions</button><button className={saved ? 'saved' : ''} onClick={onSave}><Bookmark size={15} />{saved ? 'Saved' : 'Save'}</button></div>
+  </section>;
+}
+</file>
+
+<file path="frontend/src/services/guideData.ts">
+import { CategoryOption, Place } from '../types/guide.types';
+
+export const categories: CategoryOption[] = [
+  { name: 'Clinics', symbol: '+', color: '#b94b3c' }, { name: 'Libraries', symbol: '▮', color: '#4f876f' },
+  { name: 'Shelters', symbol: '⌂', color: '#cb8c38' }, { name: 'Hospitals', symbol: '+', color: '#3b77a2' },
+  { name: 'Police Stations', symbol: '●', color: '#375f93' }, { name: 'Pharmacies', symbol: '●', color: '#81528d' },
+  { name: 'Dentists', symbol: '●', color: '#77909c' }, { name: 'SPCA', symbol: '♥', color: '#815c54' },
+  { name: 'Fire Stations', symbol: '♦', color: '#bd6240' }, { name: 'Home Affairs', symbol: '▦', color: '#75664b' },
+  { name: 'Malls', symbol: '●', color: '#a45b83' }, { name: 'Transport', symbol: '▰', color: '#847337' },
+  { name: 'Schools / Universities', symbol: '◆', color: '#43858a' },
+];
+
+const placeRows: [string, string, string, number, number][] = [
+  ['Cape Town Civic Centre', 'Home Affairs', 'Cape Town', -33.925, 18.424], ['Groote Schuur Hospital', 'Hospitals', 'Observatory', -33.941, 18.465],
+  ['Sea Point Police Station', 'Police Stations', 'Sea Point', -33.918, 18.386], ['Cape Town Central Library', 'Libraries', 'CBD', -33.925, 18.423],
+  ['Woodstock Clinic', 'Clinics', 'Woodstock', -33.927, 18.448], ['Mowbray Maternity Hospital', 'Hospitals', 'Mowbray', -33.948, 18.475],
+  ['Rondebosch Library', 'Libraries', 'Rondebosch', -33.961, 18.476], ['Khayelitsha Mall', 'Malls', 'Khayelitsha', -34.037, 18.678],
+  ['Mitchells Plain Clinic', 'Clinics', 'Mitchells Plain', -34.048, 18.617], ['Bellville Police Station', 'Police Stations', 'Bellville', -33.9, 18.628],
+  ['Tygerberg Hospital', 'Hospitals', 'Parow', -33.908, 18.596], ['Milnerton Library', 'Libraries', 'Milnerton', -33.879, 18.496],
+  ['Hout Bay Fire Station', 'Fire Stations', 'Hout Bay', -34.044, 18.348], ['Wynberg SPCA', 'SPCA', 'Wynberg', -34.003, 18.468],
+  ['Claremont Transport Hub', 'Transport', 'Claremont', -33.981, 18.465], ['UCT', 'Schools / Universities', 'Rondebosch', -33.957, 18.461],
+  ['Table View Shelter', 'Shelters', 'Table View', -33.824, 18.488], ['Kloof Street Pharmacy', 'Pharmacies', 'Gardens', -33.932, 18.41],
+];
+
+export const places: Place[] = placeRows.map(([name, category, area, lat, lng]) => ({
+  name, category: category as Place['category'], area, lat, lng,
+}));
+</file>
+
+<file path="frontend/src/types/guide.types.ts">
+export type Category =
+  | 'Clinics' | 'Libraries' | 'Shelters' | 'Hospitals' | 'Police Stations'
+  | 'Pharmacies' | 'Dentists' | 'SPCA' | 'Fire Stations' | 'Home Affairs'
+  | 'Malls' | 'Transport' | 'Schools / Universities';
+
+export type Place = { name: string; category: Category; area: string; lat: number; lng: number };
+export type CategoryOption = { name: Category; symbol: string; color: string };
+</file>
 
 <file path="backend/src/config/southAfricaAreas.ts">
 export type SouthAfricaArea = {
@@ -659,6 +948,9 @@ create index if not exists services_category_id_idx
 
 <file path="frontend/src/components/Auth/AuthLayout.tsx">
 import { ReactNode } from 'react';
+import { MapPin, Navigation, Sparkles } from 'lucide-react';
+import AuthMap from './AuthMap';
+import BrandCompass from './BrandCompass';
 
 type AuthLayoutProps = {
 	children: ReactNode;
@@ -668,32 +960,31 @@ type AuthLayoutProps = {
 function AuthLayout({ children, label }: Readonly<AuthLayoutProps>) {
 	return (
 		<main className="auth-page">
-			<section className="auth-story" aria-label="ServiceFinder introduction">
+			<AuthMap />
+			<section className="auth-story" aria-label="The Cape Guide introduction">
 				<div className="story-content">
-					<a className="brand" href="/" aria-label="ServiceFinder home">
-						<span className="brand-mark" aria-hidden="true"><span>⌕</span></span>
-						<span className="brand-name">Service<span>Finder</span></span>
+					<a className="brand" href="/" aria-label="The Cape Guide home">
+						<span className="brand-mark" aria-hidden="true"><BrandCompass /></span>
+						<span className="brand-name">The Cape Guide</span>
 					</a>
 
 					<div className="story-copy">
-						<p className="eyebrow">FIND <span>•</span> CONNECT <span>•</span> ACCESS</p>
-						<h1>Your Gateway to <strong>Essential Services</strong></h1>
+						<p className="eyebrow">FIND <span>•</span> NAVIGATE <span>•</span> CONNECT</p>
+						<h1>Your guide to <strong>essential services.</strong></h1>
 						<p className="story-description">
 							Find public and private services near you — quickly, easily and reliably.
 							From hospitals and libraries to police stations and more.
 						</p>
 					</div>
 
-					<div className="story-features" aria-label="ServiceFinder benefits">
-						<div className="story-feature"><span className="feature-icon">⌖</span><strong>Locate</strong><small>nearby services</small></div>
-						<div className="story-feature"><span className="feature-icon">➤</span><strong>Get</strong><small>directions</small></div>
-						<div className="story-feature"><span className="feature-icon">♢</span><strong>Access</strong><small>what you need</small></div>
+					<div className="story-features" aria-label="The Cape Guide benefits">
+						<div className="story-feature"><MapPin className="feature-icon" aria-hidden="true" /><strong>Locate</strong><small>nearby services</small></div>
+						<div className="story-feature"><Navigation className="feature-icon" aria-hidden="true" /><strong>Navigate</strong><small>with confidence</small></div>
+						<div className="story-feature"><Sparkles className="feature-icon" aria-hidden="true" /><strong>Discover</strong><small>what you need</small></div>
 					</div>
 				</div>
 			</section>
-			<section className="auth-panel" aria-label={label}>
-				{children}
-			</section>
+			<section className="auth-panel" aria-label={label}>{children}</section>
 		</main>
 	);
 }
@@ -859,7 +1150,7 @@ function ForgotPassword() {
 	}
 
 	return (
-		<AuthLayout label="Reset your ServiceFinder password">
+		<AuthLayout label="Reset your Cape Guide password">
 			<div className="login-card auth-form-card">
 				<div className="login-heading">
 					<p className="panel-kicker">ACCOUNT RECOVERY</p>
@@ -929,12 +1220,12 @@ function ResetPassword() {
 	}
 
 	return (
-		<AuthLayout label="Set a new ServiceFinder password">
+		<AuthLayout label="Set a new Cape Guide password">
 			<div className="login-card auth-form-card">
 				<div className="login-heading">
 					<p className="panel-kicker">ACCOUNT RECOVERY</p>
 					<h2>Set New Password</h2>
-					<p>Choose a new password for your<br />ServiceFinder account.</p>
+					<p>Choose a new password for your<br />Cape Guide account.</p>
 				</div>
 				<form onSubmit={handleSubmit} noValidate>
 					{message && <p className={isSuccess ? 'form-success' : 'form-error'} role="alert">{message}</p>}
@@ -1008,29 +1299,23 @@ function Signup() {
 	}
 
 	return (
-		<AuthLayout label="Create your ServiceFinder account">
+		<AuthLayout label="Create your Cape Guide account">
 			<div className="login-card auth-form-card">
 				<div className="login-heading">
-					<p className="panel-kicker">SERVICEFINDER ACCOUNT</p>
+					<p className="panel-kicker">THE CAPE GUIDE</p>
 					<h2>Create Account</h2>
-					<p>Join ServiceFinder to find essential services<br />near you.</p>
+					<p>Join The Cape Guide to find essential services<br />near you.</p>
 				</div>
 				<form onSubmit={handleSubmit} noValidate>
 					{message && <p className={isSuccess ? 'form-success' : 'form-error'} role="alert">{message}</p>}
 					<div className="auth-input-row">
-						<label className="field-label" htmlFor="signup-first-name">First name</label>
-						<input className="auth-input" id="signup-first-name" type="text" value={form.firstName} onChange={(event) => updateField('firstName', event.target.value)} placeholder="First name" autoComplete="given-name" />
-						<label className="field-label" htmlFor="signup-last-name">Last name</label>
-						<input className="auth-input" id="signup-last-name" type="text" value={form.lastName} onChange={(event) => updateField('lastName', event.target.value)} placeholder="Last name" autoComplete="family-name" />
+						<div className="auth-field"><label className="field-label" htmlFor="signup-first-name">First name</label><input className="auth-input" id="signup-first-name" type="text" value={form.firstName} onChange={(event) => updateField('firstName', event.target.value)} placeholder="First name" autoComplete="given-name" /></div>
+						<div className="auth-field"><label className="field-label" htmlFor="signup-last-name">Last name</label><input className="auth-input" id="signup-last-name" type="text" value={form.lastName} onChange={(event) => updateField('lastName', event.target.value)} placeholder="Last name" autoComplete="family-name" /></div>
 					</div>
-					<label className="field-label" htmlFor="signup-phone">Phone number</label>
-					<input className="auth-input" id="signup-phone" type="tel" value={form.phoneNumber} onChange={(event) => updateField('phoneNumber', event.target.value)} placeholder="Phone number" autoComplete="tel" />
-					<label className="field-label" htmlFor="signup-email">Email address</label>
-					<input className="auth-input" id="signup-email" type="email" value={form.email} onChange={(event) => updateField('email', event.target.value)} placeholder="Email address" autoComplete="email" />
-					<label className="field-label" htmlFor="signup-password">Password</label>
-					<input className="auth-input" id="signup-password" type="password" value={form.password} onChange={(event) => updateField('password', event.target.value)} placeholder="Password" autoComplete="new-password" />
-					<label className="field-label" htmlFor="signup-confirm-password">Confirm password</label>
-					<input className="auth-input" id="signup-confirm-password" type="password" value={form.confirmPassword} onChange={(event) => updateField('confirmPassword', event.target.value)} placeholder="Confirm password" autoComplete="new-password" />
+					<div className="auth-field"><label className="field-label" htmlFor="signup-phone">Phone number</label><input className="auth-input" id="signup-phone" type="tel" value={form.phoneNumber} onChange={(event) => updateField('phoneNumber', event.target.value)} placeholder="Phone number" autoComplete="tel" /></div>
+					<div className="auth-field"><label className="field-label" htmlFor="signup-email">Email address</label><input className="auth-input" id="signup-email" type="email" value={form.email} onChange={(event) => updateField('email', event.target.value)} placeholder="Email address" autoComplete="email" /></div>
+					<div className="auth-field"><label className="field-label" htmlFor="signup-password">Password</label><input className="auth-input" id="signup-password" type="password" value={form.password} onChange={(event) => updateField('password', event.target.value)} placeholder="Password" autoComplete="new-password" /></div>
+					<div className="auth-field"><label className="field-label" htmlFor="signup-confirm-password">Confirm password</label><input className="auth-input" id="signup-confirm-password" type="password" value={form.confirmPassword} onChange={(event) => updateField('confirmPassword', event.target.value)} placeholder="Confirm password" autoComplete="new-password" /></div>
 					<button className="submit-button" type="submit">Create Account <span aria-hidden="true">→</span></button>
 				</form>
 				<p className="signup-prompt">Already have an account? <Link to="/login">Log In</Link></p>
@@ -1331,9 +1616,9 @@ function LoginForm() {
 	return (
 		<div className="login-card" aria-labelledby="login-title">
 				<div className="login-heading">
-					<p className="panel-kicker">SERVICEFINDER ACCOUNT</p>
+					<p className="panel-kicker">THE CAPE GUIDE</p>
 					<h2 id="login-title">Welcome Back</h2>
-					<p>Log in to your ServiceFinder account<br />to continue.</p>
+					<p>Log in to your Cape Guide account<br />to continue.</p>
 				</div>
 
 				<form onSubmit={async (event) => {
@@ -1455,7 +1740,7 @@ function Login() {
 		localStorage.removeItem('servicefinder_refresh_token');
 	}, []);
 
-	return <AuthLayout label="Log in to your ServiceFinder account"><LoginForm /></AuthLayout>;
+	return <AuthLayout label="Log in to your Cape Guide account"><LoginForm /></AuthLayout>;
 }
 
 export default Login;
@@ -2370,11 +2655,229 @@ export default router
 }
 </file>
 
+<file path="frontend/package.json">
+{
+  "name": "service-finder-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "axios": "^1.7.0",
+    "dexie": "^4.4.6",
+    "dexie-react-hooks": "^4.4.0",
+    "dotenv": "^17.4.2",
+    "firebase": "^10.13.0",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "react-router-dom": "^6.26.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0"
+  }
+}
+</file>
+
+<file path="frontend/tsconfig.tsbuildinfo">
+{
+    "root": [
+        "./src/app.tsx",
+        "./src/main.tsx",
+        "./src/vite-env.d.ts",
+        "./src/components/adminpanel/adminpanel.tsx",
+        "./src/components/auth/authlayout.tsx",
+        "./src/components/auth/authmap.tsx",
+        "./src/components/auth/brandcompass.tsx",
+        "./src/components/auth/loginform.tsx",
+        "./src/components/auth/signupform.tsx",
+        "./src/components/dashboard/dashboard.tsx",
+        "./src/components/map/leafletmap.tsx",
+        "./src/components/map/mapmarker.tsx",
+        "./src/components/map/mapview.tsx",
+        "./src/components/searchbar/guidesearch.tsx",
+        "./src/components/searchbar/searchbar.tsx",
+        "./src/components/servicecard/servicecard.tsx",
+        "./src/components/servicecard/servicepopup.tsx",
+        "./src/components/common/button.tsx",
+        "./src/components/common/categoryicon.tsx",
+        "./src/components/common/incidenticon.tsx",
+        "./src/components/common/loader.tsx",
+        "./src/context/authcontext.tsx",
+        "./src/hooks/useauth.ts",
+        "./src/hooks/useservices.ts",
+        "./src/hooks/usetrafficincidents.ts",
+        "./src/pages/admin.tsx",
+        "./src/pages/dashboard.tsx",
+        "./src/pages/forgotpassword.tsx",
+        "./src/pages/home.tsx",
+        "./src/pages/login.tsx",
+        "./src/pages/resetpassword.tsx",
+        "./src/pages/signup.tsx",
+        "./src/services/api.ts",
+        "./src/services/authservice.ts",
+        "./src/services/guidedata.ts",
+        "./src/services/mapsservice.ts",
+        "./src/types/guide.types.ts",
+        "./src/types/service.types.ts",
+        "./src/types/traffic.types.ts",
+        "./src/types/user.types.ts",
+        "./src/utils/constants.ts",
+        "./src/utils/formatters.ts"
+    ],
+    "version": "5.9.3"
+}
+</file>
+
+<file path="backend/src/api/lib/http.ts">
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+import { RateLimiter } from './rate_limit'
+
+const limiters = new Map<string, RateLimiter>()
+
+export function setRateLimit(name: string, maxCalls: number, windowMs: number) {
+  limiters.set(name, new RateLimiter(maxCalls, windowMs))
+}
+
+export async function waitForRateLimit(name: string): Promise<void> {
+  const limiter = limiters.get(name)
+  if (limiter) await limiter.waitForSlot()
+}
+export function requireEnv(name: string, value: string | undefined): string {
+  if (!value) throw new Error(`${name} is not configured`)
+  return value
+}
+
+export async function request<T = any>(
+  baseUrl: string,
+  path: string,
+  options: {
+    method?: string
+    headers?: Record<string, string>
+    params?: Record<string, string | number>
+    body?: unknown
+    retries?: number         
+    limiter?: string          
+  } = {}
+): Promise<T> {
+  const url = new URL(baseUrl + path)
+  for (const [k, v] of Object.entries(options.params ?? {})) {
+    url.searchParams.set(k, String(v))
+  }
+
+  const limiterName = options.limiter
+  if (limiterName !== undefined) await waitForRateLimit(limiterName)
+
+  const res = await fetch(url, {
+    method: options.method ?? 'GET',
+    headers: options.body ? { 'Content-Type': 'application/json', ...options.headers } : options.headers,
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  })
+
+ //acts as the rate throttle 
+  const retries = options.retries ?? 1
+  if ((res.status === 429 || res.status >= 500) && retries > 0) {
+    const retryAfter = Number(res.headers.get('Retry-After'))   // seconds, if they told us
+    const waitMs = retryAfter > 0
+      ? retryAfter * 1000                                        
+      : 250 * Math.pow(2, (options.retries ?? 1) - retries + 1) 
+    console.warn(`[http] ${res.status} — retrying in ${waitMs}ms (${retries} left)`)
+    await sleep(waitMs)
+    return request(baseUrl, path, { ...options, retries: retries - 1 })
+  }
+  if (!res.ok) {
+    const safeUrl = new URL(url)
+    safeUrl.searchParams.delete('apiKey')
+    safeUrl.searchParams.delete('key')
+    const responseText = await res.text()
+    let upstreamMessage = responseText
+
+    try {
+      const responseBody = JSON.parse(responseText) as {
+        detailedError?: { message?: string }
+      }
+      upstreamMessage = responseBody.detailedError?.message ?? responseText
+    } catch {
+      // Keep the raw response when the upstream service does not return JSON.
+    }
+
+    throw new Error(`${res.status} ${res.statusText}: ${upstreamMessage} (${safeUrl})`)
+  }
+  return res.json()
+
+
+  
+}
+</file>
+
+<file path="backend/src/routes/accidentRoutes.ts">
+import { Router } from 'express';
+import { getAccidentDetails, getTrafficIncidents } from '../controllers/accidentController'
+const router = Router();
+
+router.get('/', getTrafficIncidents)
+router.get('/:externalId', getAccidentDetails);
+
+
+
+export default router;
+</file>
+
+<file path="backend/src/routes/serviceRoutes.ts">
+import { Router } from 'express';
+import { getServiceDetails, getServices, updateService } from '../controllers/serviceController';
+import { authenticateToken, requireAdmin } from '../middleware/auth';
+
+const router = Router();
+
+router.get('/', getServices);
+router.get('/:externalId', getServiceDetails);
+router.patch('/:id', authenticateToken, requireAdmin, updateService);
+// router.post('/suggest', suggestService);
+
+export default router;
+</file>
+
+<file path="backend/.env.example">
+PORT=5000
+SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_KEY=your_supabase_service_key
+MAPS_API_KEY=your_maps_api_key_here
+MAPS_DAILY_LIMIT=1000
+FIREBASE_PROJECT_ID=
+FIREBASE_CLIENT_EMAIL=
+FIREBASE_PRIVATE_KEY=
+GEOAPIFY_API_KEY=your_geoapify_api_key_here
+ADMIN_IMPORT_TOKEN=use_a_long_random_value
+# Optional. Set to true to import services once when the server boots.
+AUTO_IMPORT_SERVICES=false
+# Optional. Leave blank to disable automatic imports.
+IMPORT_INTERVAL_MS=0
+# Optional. Set to true to import traffic incidents once when the server boots.
+AUTO_IMPORT_TRAFFIC=false
+# Optional. Milliseconds between automatic traffic incident imports (1 TomTom request per run).
+# Leave blank or 0 to disable.
+# Budget note: TomTom's free tier for Traffic Incidents API Details is 2500 requests/MONTH.
+#   300000 (5 min) = ~8640/month = 346% of the free quota  <-- over budget
+#   1800000 (30 min) = ~1440/month = 58% of the free quota  <-- recommended
+#   3600000 (60 min) = ~720/month  = 29% of the free quota
+TRAFFIC_IMPORT_INTERVAL_MS=0
+</file>
+
 <file path="frontend/src/pages/Dashboard.tsx">
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+<<<<<<< HEAD
 import { renderToStaticMarkup } from 'react-dom/server';
 import { BookOpen, Bookmark, Bus, Clock3, Flame, GraduationCap, Heart, Hospital, House, Landmark, Library, LocateFixed, MapPinned, Minus, Navigation, Phone, Pill, Plus, Search, Shield, ShoppingBag, Smile, Stethoscope, X } from 'lucide-react';
-
+  
 declare const L: any;
 type Category = 'Clinics' | 'Libraries' | 'Shelters' | 'Hospitals' | 'Police Stations' | 'Pharmacies' | 'Dentists' | 'SPCA' | 'Fire Stations' | 'Home Affairs' | 'Malls' | 'Transport' | 'Schools / Universities';
 type Place = { name: string; category: Category; area: string; lat: number; lng: number };
@@ -2980,177 +3483,116 @@ function Dashboard() {
 }
 
 export default Dashboard;
-</file>
+=======
+import { BookOpen, MapPinned, Minus, Plus, X } from 'lucide-react';
+import LeafletMap from '../components/Map/LeafletMap';
+import GuideSearch from '../components/SearchBar/GuideSearch';
+import ServicePopup from '../components/ServiceCard/ServicePopup';
+import { CategoryIcon } from '../components/common/CategoryIcon';
+import { useTrafficIncidents } from '../hooks/useTrafficIncidents';
+import { useServices } from '../hooks/useServices';
+import { categories, places } from '../services/guideData';
+import { Category, Place } from '../types/guide.types';
+import type { Service } from '../types/service.types';
 
-<file path="frontend/package.json">
-{
-  "name": "service-finder-frontend",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "axios": "^1.7.0",
-    "dexie": "^4.4.6",
-    "dexie-react-hooks": "^4.4.0",
-    "dotenv": "^17.4.2",
-    "firebase": "^10.13.0",
-    "lucide-react": "^0.468.0",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
-    "react-router-dom": "^6.26.0"
-  },
-  "devDependencies": {
-    "@types/react": "^18.3.0",
-    "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.0",
-    "typescript": "^5.5.0",
-    "vite": "^5.4.0"
-  }
-}
-</file>
-
-<file path="frontend/tsconfig.tsbuildinfo">
-{"root":["./src/app.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/adminpanel/adminpanel.tsx","./src/components/auth/authlayout.tsx","./src/components/auth/loginform.tsx","./src/components/auth/signupform.tsx","./src/components/dashboard/dashboard.tsx","./src/components/map/mapmarker.tsx","./src/components/map/mapview.tsx","./src/components/searchbar/searchbar.tsx","./src/components/servicecard/servicecard.tsx","./src/components/common/button.tsx","./src/components/common/loader.tsx","./src/components/common/navbar.tsx","./src/context/authcontext.tsx","./src/db/index.ts","./src/db/servicecache.ts","./src/hooks/useauth.ts","./src/hooks/useservices.ts","./src/pages/admin.tsx","./src/pages/dashboard.tsx","./src/pages/forgotpassword.tsx","./src/pages/home.tsx","./src/pages/login.tsx","./src/pages/resetpassword.tsx","./src/pages/signup.tsx","./src/services/api.ts","./src/services/authservice.ts","./src/services/mapsservice.ts","./src/types/service.types.ts","./src/types/user.types.ts","./src/utils/constants.ts","./src/utils/formatters.ts"],"version":"5.9.3"}
-</file>
-
-<file path="backend/src/api/lib/http.ts">
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-import { RateLimiter } from './rate_limit'
-
-const limiters = new Map<string, RateLimiter>()
-
-export function setRateLimit(name: string, maxCalls: number, windowMs: number) {
-  limiters.set(name, new RateLimiter(maxCalls, windowMs))
-}
-
-export async function waitForRateLimit(name: string): Promise<void> {
-  const limiter = limiters.get(name)
-  if (limiter) await limiter.waitForSlot()
-}
-export function requireEnv(name: string, value: string | undefined): string {
-  if (!value) throw new Error(`${name} is not configured`)
-  return value
+function parseServiceLocation(location: Service['location']): [number, number] | null {
+	if (location && typeof location === 'object' && Array.isArray(location.coordinates)) {
+		const [lng, lat] = location.coordinates.map(Number);
+		return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
+	}
+	if (Array.isArray(location)) {
+		const [lng, lat] = location.map(Number);
+		return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
+	}
+	if (typeof location !== 'string') return null;
+	const point = location.match(/POINT\s*\(\s*([-\d.]+)\s*[,\s]+\s*([-\d.]+)\s*\)/i);
+	if (point) return [Number(point[2]), Number(point[1])];
+	if (/^[0-9a-f]+$/i.test(location) && location.length >= 42) {
+		try {
+			const bytes = new Uint8Array(location.match(/.{2}/g)!.map((pair) => parseInt(pair, 16)));
+			const littleEndian = bytes[0] === 1;
+			const view = new DataView(bytes.buffer);
+			const type = view.getUint32(1, littleEndian);
+			if ((type & 0xff) === 1) {
+				const offset = type & 0x20000000 ? 9 : 5;
+				const lng = view.getFloat64(offset, littleEndian);
+				const lat = view.getFloat64(offset + 8, littleEndian);
+				return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
+			}
+		} catch {
+			return null;
+		}
+	}
+	try {
+		return parseServiceLocation(JSON.parse(location) as Service['location']);
+	} catch {
+		return null;
+	}
 }
 
-export async function request<T = any>(
-  baseUrl: string,
-  path: string,
-  options: {
-    method?: string
-    headers?: Record<string, string>
-    params?: Record<string, string | number>
-    body?: unknown
-    retries?: number         
-    limiter?: string          
-  } = {}
-): Promise<T> {
-  const url = new URL(baseUrl + path)
-  for (const [k, v] of Object.entries(options.params ?? {})) {
-    url.searchParams.set(k, String(v))
-  }
-
-  const limiterName = options.limiter
-  if (limiterName !== undefined) await waitForRateLimit(limiterName)
-
-  const res = await fetch(url, {
-    method: options.method ?? 'GET',
-    headers: options.body ? { 'Content-Type': 'application/json', ...options.headers } : options.headers,
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  })
-
- //acts as the rate throttle 
-  const retries = options.retries ?? 1
-  if ((res.status === 429 || res.status >= 500) && retries > 0) {
-    const retryAfter = Number(res.headers.get('Retry-After'))   // seconds, if they told us
-    const waitMs = retryAfter > 0
-      ? retryAfter * 1000                                        
-      : 250 * Math.pow(2, (options.retries ?? 1) - retries + 1) 
-    console.warn(`[http] ${res.status} — retrying in ${waitMs}ms (${retries} left)`)
-    await sleep(waitMs)
-    return request(baseUrl, path, { ...options, retries: retries - 1 })
-  }
-  if (!res.ok) {
-    const safeUrl = new URL(url)
-    safeUrl.searchParams.delete('apiKey')
-    safeUrl.searchParams.delete('key')
-    const responseText = await res.text()
-    let upstreamMessage = responseText
-
-    try {
-      const responseBody = JSON.parse(responseText) as {
-        detailedError?: { message?: string }
-      }
-      upstreamMessage = responseBody.detailedError?.message ?? responseText
-    } catch {
-      // Keep the raw response when the upstream service does not return JSON.
-    }
-
-    throw new Error(`${res.status} ${res.statusText}: ${upstreamMessage} (${safeUrl})`)
-  }
-  return res.json()
-
-
-  
+function serviceCategory(service: Service): Category | null {
+	const source = `${service.category?.name ?? ''} ${service.category?.slug ?? ''} ${service.type ?? ''}`.toLowerCase();
+	const aliases: Partial<Record<Category, string[]>> = {
+		'Hospitals': ['hospital'],
+		'Police Stations': ['police'],
+		'Fire Stations': ['fire station', 'firestation'],
+		'Schools / Universities': ['school', 'university', 'college'],
+		'Home Affairs': ['home affairs', 'government'],
+	};
+	return categories.find((item) => {
+		const name = item.name.toLowerCase();
+		return source.includes(name) || source.includes(name.endsWith('s') ? name.slice(0, -1) : name) || aliases[item.name]?.some((alias) => source.includes(alias));
+	})?.name ?? null;
 }
-</file>
 
-<file path="backend/src/routes/accidentRoutes.ts">
-import { Router } from 'express';
-import { getAccidentDetails, getTrafficIncidents } from '../controllers/accidentController'
-const router = Router();
+function serviceToPlace(service: Service): Place | null {
+	const coordinates = parseServiceLocation(service.location);
+	const category = serviceCategory(service);
+	if (!coordinates || !category) return null;
+	return {
+		name: service.name,
+		category,
+		area: service.formatted_address?.split(',')[0] ?? category,
+		lat: coordinates[0],
+		lng: coordinates[1],
+	};
+}
 
-router.get('/', getTrafficIncidents)
-router.get('/:externalId', getAccidentDetails);
+export default function Dashboard() {
+	const [query, setQuery] = useState('');
+	const [active, setActive] = useState<Category | null>(null);
+	const [selected, setSelected] = useState<Place | null>(null);
+	const [notice, setNotice] = useState('');
+	const [aboutOpen, setAboutOpen] = useState(false);
+	const [legendOpen, setLegendOpen] = useState(false);
+	const [saved, setSaved] = useState<string[]>([]);
+	const { incidents } = useTrafficIncidents();
+	const { services, error: servicesError } = useServices();
+	const mapRef = useRef<any>(null);
+	const allPlaces = useMemo(() => {
+		const apiPlaces = services.map(serviceToPlace).filter((place): place is Place => place !== null);
+		return apiPlaces.length > 0 ? apiPlaces : places;
+	}, [services]);
+	const visible = useMemo(() => allPlaces.filter((place) => (!active || place.category === active) && `${place.name} ${place.area} ${place.category}`.toLowerCase().includes(query.toLowerCase())), [active, allPlaces, query]);
+	const selectPlace = useCallback((place: Place) => { setSelected(place); mapRef.current?.flyTo([place.lat, place.lng], 15, { animate: true, duration: 0.7 }); }, []);
+	const search = () => { const first = visible[0]; if (first) selectPlace(first); setNotice(first ? `${visible.length} place${visible.length === 1 ? '' : 's'} found` : 'No places found'); };
+	const locate = () => navigator.geolocation?.getCurrentPosition((position) => { mapRef.current?.flyTo([position.coords.latitude, position.coords.longitude], 14); setNotice('Showing your current location.'); }, () => setNotice('We could not access your location.'));
+	useEffect(() => { if (servicesError) setNotice('Showing sample services while the full service list is unavailable.'); }, [servicesError]);
 
-
-
-export default router;
-</file>
-
-<file path="backend/src/routes/serviceRoutes.ts">
-import { Router } from 'express';
-import { getServiceDetails, getServices, updateService } from '../controllers/serviceController';
-import { authenticateToken, requireAdmin } from '../middleware/auth';
-
-const router = Router();
-
-router.get('/', getServices);
-router.get('/:externalId', getServiceDetails);
-router.patch('/:id', authenticateToken, requireAdmin, updateService);
-// router.post('/suggest', suggestService);
-
-export default router;
-</file>
-
-<file path="backend/.env.example">
-PORT=5000
-SUPABASE_URL=your_supabase_url
-SUPABASE_SERVICE_KEY=your_supabase_service_key
-MAPS_API_KEY=your_maps_api_key_here
-MAPS_DAILY_LIMIT=1000
-FIREBASE_PROJECT_ID=
-FIREBASE_CLIENT_EMAIL=
-FIREBASE_PRIVATE_KEY=
-GEOAPIFY_API_KEY=your_geoapify_api_key_here
-ADMIN_IMPORT_TOKEN=use_a_long_random_value
-# Optional. Set to true to import services once when the server boots.
-AUTO_IMPORT_SERVICES=false
-# Optional. Leave blank to disable automatic imports.
-IMPORT_INTERVAL_MS=0
-# Optional. Set to true to import traffic incidents once when the server boots.
-AUTO_IMPORT_TRAFFIC=false
-# Optional. Milliseconds between automatic traffic incident imports (1 TomTom request per run).
-# Leave blank or 0 to disable.
-# Budget note: TomTom's free tier for Traffic Incidents API Details is 2500 requests/MONTH.
-#   300000 (5 min) = ~8640/month = 346% of the free quota  <-- over budget
-#   1800000 (30 min) = ~1440/month = 58% of the free quota  <-- recommended
-#   3600000 (60 min) = ~720/month  = 29% of the free quota
-TRAFFIC_IMPORT_INTERVAL_MS=0
+	return <main className="guide-shell">
+		<LeafletMap places={visible} incidents={incidents} onSelect={selectPlace} mapRef={mapRef} />
+		<header className="masthead"><h1>The Cape Guide</h1><p>Find. Navigate. Connect.</p></header>
+		<GuideSearch query={query} onQueryChange={setQuery} onSearch={search} onLocate={locate} />
+		{notice && <div className="notice">{notice}</div>}
+		{selected && <ServicePopup place={selected} saved={saved.includes(selected.name)} onClose={() => setSelected(null)} onNotice={setNotice} onSave={() => setSaved((current) => current.includes(selected.name) ? current.filter((name) => name !== selected.name) : [...current, selected.name])} />}
+		<button className="panel-trigger about-trigger" onClick={() => setAboutOpen(true)}><BookOpen size={17} />About the Guide</button>
+		<button className="panel-trigger legend-trigger" onClick={() => setLegendOpen(true)}><MapPinned size={17} />Legend</button>
+		{aboutOpen && <aside className="about popup-panel"><button className="close-panel" aria-label="Close about" onClick={() => setAboutOpen(false)}><X size={17} /></button><h2>About the Cape<br />Guide</h2><p>The Cape Guide is a map-based service finder designed to help people discover useful public services across Cape Town. Search, explore and navigate to the services you need — all from one map.</p><div className="motto">Every road leads somewhere.<br />Every service helps someone.</div></aside>}
+		{legendOpen && <aside className="legend popup-panel"><button className="close-panel" aria-label="Close legend" onClick={() => setLegendOpen(false)}><X size={17} /></button><h2>Legend</h2>{categories.map((item) => <button key={item.name} className={active === item.name ? 'active' : ''} onClick={() => { setActive(active === item.name ? null : item.name); setSelected(null); }}><i style={{ background: item.color }}><CategoryIcon category={item.name} /></i>{item.name}</button>)}<button className="you-are" onClick={locate}><i><MapPinned size={16} /></i>You Are Here</button></aside>}
+		<div className="leaflet-zoom"><button aria-label="Zoom in" onClick={() => mapRef.current?.zoomIn()}><Plus size={18} /></button><button aria-label="Zoom out" onClick={() => mapRef.current?.zoomOut()}><Minus size={18} /></button></div>
+	</main>;
+}
+>>>>>>> b526a829881dfbcf150f1a74a5c94a1c1c911258
 </file>
 
 <file path="backend/src/models/Service.ts">
@@ -3302,13 +3744,22 @@ app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 </file>
 
 <file path="frontend/src/services/api.ts">
+<<<<<<< HEAD
 import type { TrafficIncident } from '../types/traffic.types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+=======
+import type { Service } from "../types/service.types";
+import type { TrafficIncident } from "../types/traffic.types";
+
+const configuredApiUrl = (import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/+$/, "");
+const API_BASE_URL = configuredApiUrl.endsWith("/api") ? configuredApiUrl : `${configuredApiUrl}/api`;
+>>>>>>> b526a829881dfbcf150f1a74a5c94a1c1c911258
 
 type ApiError = { error?: string };
 
 async function request<T>(path: string, options: RequestInit): Promise<T> {
+<<<<<<< HEAD
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
@@ -3332,6 +3783,20 @@ async function request<T>(path: string, options: RequestInit): Promise<T> {
   const payload = await response.json() as T & ApiError;
   if (!response.ok) throw new Error(payload.error || 'Something went wrong.');
   return payload;
+=======
+	let response: Response;
+	try {
+		response = await fetch(`${API_BASE_URL}${path}`, {
+			...options,
+			headers: { "Content-Type": "application/json", ...options.headers },
+		});
+	} catch {
+		throw new Error("Unable to reach the authentication server. Start the backend and check its Supabase configuration.");
+	}
+	const payload = await response.json() as T & ApiError;
+	if (!response.ok) throw new Error(payload.error || "Something went wrong.");
+	return payload;
+>>>>>>> b526a829881dfbcf150f1a74a5c94a1c1c911258
 }
 
 export type AuthResponse = {
@@ -3347,6 +3812,7 @@ export async function getTrafficIncidents(): Promise<TrafficIncident[]> {
 }
 
 export function loginRequest(email: string, password: string) {
+<<<<<<< HEAD
   return request<AuthResponse>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
@@ -3390,11 +3856,58 @@ export function getServices(params?: { type?: string; q?: string; limit?: number
 export function getServiceDetails(externalId: string) {
   return request<Service>(`/services/${encodeURIComponent(externalId)}`, { method: 'GET' });
 }
+=======
+	return request<AuthResponse>("/auth/login", {
+		method: "POST",
+		body: JSON.stringify({ email, password }),
+	});
+}
+
+export function signupRequest(firstName: string, lastName: string, phoneNumber: string, email: string, password: string) {
+	return request<AuthResponse>("/auth/signup", {
+		method: "POST",
+		body: JSON.stringify({ firstName, lastName, phoneNumber, email, password }),
+	});
+}
+
+export function forgotPasswordRequest(email: string) {
+	return request<{ message: string }>("/auth/forgot-password", {
+		method: "POST",
+		body: JSON.stringify({ email }),
+	});
+}
+
+export function resetPasswordRequest(accessToken: string, password: string) {
+	return request<{ message: string }>("/auth/reset-password", {
+		method: "POST",
+		body: JSON.stringify({ accessToken, password }),
+	});
+}
+
+export async function getServices(): Promise<Service[]> {
+	const response = await fetch(`${API_BASE_URL}/services?limit=1000`);
+	if (!response.ok) throw new Error(`Unable to load services (${response.status})`);
+	return response.json() as Promise<Service[]>;
+}
+
+export async function getServiceDetails(externalId: string): Promise<Service> {
+	const response = await fetch(`${API_BASE_URL}/services/${encodeURIComponent(externalId)}`);
+	if (!response.ok) throw new Error(`Unable to load service details (${response.status})`);
+	return response.json() as Promise<Service>;
+}
+
+export async function getTrafficIncidents(): Promise<TrafficIncident[]> {
+	const response = await fetch(`${API_BASE_URL}/traffic-incidents`);
+	if (!response.ok) throw new Error(`Unable to load traffic incidents (${response.status})`);
+	return response.json() as Promise<TrafficIncident[]>;
+}
+>>>>>>> b526a829881dfbcf150f1a74a5c94a1c1c911258
 </file>
 
 <file path="frontend/src/styles/index.css">
 @import './variables.css';
 
+<<<<<<< HEAD
 * {
   box-sizing: border-box;
 }
@@ -4647,6 +5160,108 @@ a {
     top: 143px;
   }
 }
+=======
+* { box-sizing: border-box; }
+
+body { margin: 0; min-width: 320px; }
+button, input { font: inherit; }
+a { color: inherit; }
+.dashboard-placeholder { min-height: 100vh; display: grid; place-items: center; color: #102d4e; background: #edf4f8; }
+.dashboard-placeholder h1 { font-size: 32px; }
+
+.auth-page { min-height: 100vh; display: grid; grid-template-columns: minmax(320px, .7fr) minmax(620px, 1fr); background: linear-gradient(105deg, rgba(4, 28, 49, .7) 0%, rgba(10, 72, 102, .28) 52%, rgba(220, 237, 246, .28) 100%), url('../assets/service1.jpg') center / cover; }
+.auth-story { position: relative; display: flex; align-items: center; min-height: 100vh; padding: 50px clamp(40px, 7vw, 108px); color: #fff; overflow: hidden; }
+.auth-story::after { display: none; }
+.story-content { position: relative; z-index: 1; width: 100%; max-width: 560px; display: flex; flex-direction: column; align-items: flex-start; text-align: left; }
+.brand { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 6px; text-decoration: none; font-weight: 700; }
+.brand-mark { display: grid; width: 68px; height: 68px; place-items: center; border-radius: 50%; color: #fff; background: transparent; transform: none; box-shadow: none; }
+.brand-mark span { font-size: 37px; line-height: 1; transform: none; }
+.brand-name { font-size: clamp(24px, 2.5vw, 34px); letter-spacing: -.7px; }
+.brand-name span, .story-copy strong { color: #08aef0; }
+.story-copy { margin-top: clamp(76px, 12vh, 132px); }
+.eyebrow { margin: 0 0 22px; font-size: 10px; letter-spacing: 4px; opacity: .9; }
+.eyebrow span { margin: 0 5px; color: #08aef0; }
+.story-copy h1 { max-width: 460px; margin: 0; font-size: clamp(35px, 4.1vw, 58px); line-height: 1.08; letter-spacing: -1.5px; font-weight: 700; }
+.story-copy h1 strong { display: block; }
+.story-description { max-width: 410px; margin: 26px 0 0; font-size: 16px; line-height: 1.48; color: rgba(255,255,255,.9); }
+.story-features { display: flex; gap: 0; margin-top: 63px; }
+.story-feature { min-width: 120px; padding: 0 23px; border-left: 1px solid rgba(255,255,255,.3); display: flex; flex-direction: column; }
+.story-feature:first-child { padding-left: 0; border-left: 0; }
+.feature-icon { margin-bottom: 8px; color: #08aef0; font-size: 31px; line-height: 1; }
+.story-feature strong { font-size: 15px; }
+.story-feature small { margin-top: 3px; font-size: 11px; color: rgba(255,255,255,.72); }
+
+.auth-panel { display: grid; place-items: center; padding: 48px clamp(24px, 5vw, 120px); background: transparent; }
+.login-card { position: relative; width: min(100%, 560px); padding: 30px clamp(29px, 4vw, 58px) 36px; border: 1px solid rgba(255,255,255,.8); border-left: 5px solid #08aef0; border-radius: 8px 30px 8px 30px; background: rgba(245, 249, 252, .91); box-shadow: 18px 24px 0 rgba(3, 41, 66, .14), 0 24px 60px rgba(13, 48, 71, .22); }
+.login-card::before { display: none; }
+.panel-kicker { margin: 0 0 10px; color: #1b91d0; font-size: 10px; font-weight: 700; letter-spacing: 2px; }
+.login-heading h2 { margin: 0; color: #102d4e; font-size: clamp(28px, 3vw, 38px); letter-spacing: -1px; }
+.login-heading p { margin: 6px 0 24px; color: #6a819a; font-size: 13px; line-height: 1.45; }
+.form-error { margin: 0 0 13px; padding: 9px 11px; border: 1px solid #f1b7b7; border-radius: 6px; color: #9a3030; background: #fff2f2; font-size: 11px; line-height: 1.4; }
+.form-success { margin: 0 0 13px; padding: 9px 11px; border: 1px solid #add9bd; border-radius: 6px; color: #216b43; background: #effaf3; font-size: 11px; line-height: 1.4; }
+.field-label { position: absolute; width: 5px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.auth-form-card form { display: flex; flex-direction: column; gap: 13px; }
+.auth-input-row { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
+.auth-input { width: 100%; height: 45px; padding: 0 13px; border: 1px solid #dbe5ee; border-radius: 6px; outline: 0; color: #173653; background: rgba(255,255,255,.76); }
+.auth-input:focus { border-color: #159feb; box-shadow: 0 0 0 3px rgba(21,159,235,.14); }
+.auth-input::placeholder { color: #91a6ba; font-size: 11px; }
+.input-wrap { position: relative; margin-bottom: 13px; }
+.input-wrap input { width: 100%; height: 45px; padding: 0 40px; border: 1px solid #dbe5ee; border-radius: 6px; outline: 0; color: #173653; background: rgba(255,255,255,.76); transition: border-color .2s, box-shadow .2s; }
+.input-wrap input:focus { border-color: #159feb; box-shadow: 0 0 0 3px rgba(21,159,235,.14); }
+.input-wrap input::placeholder { color: #91a6ba; font-size: 11px; }
+.input-icon { position: absolute; top: 13px; left: 12px; z-index: 1; color: #173653; font-size: 17px; }
+.visibility-button { position: absolute; top: 0; right: 0; width: 42px; height: 45px; border: 0; color: #173653; background: transparent; cursor: pointer; }
+.form-options { display: flex; align-items: center; justify-content: space-between; margin: 1px 0 16px; color: #57718d; font-size: 10px; }
+.form-options a, .signup-prompt a { color: #007fd1; text-decoration: none; }
+.remember-option { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+.remember-option input { accent-color: #087fd9; }
+.submit-button, .google-button { width: 100%; height: 44px; border-radius: 7px; cursor: pointer; font-size: 12px; }
+.submit-button { border: 0; color: #fff; background: linear-gradient(100deg, #0967c5, #0798f5); box-shadow: 0 8px 14px rgba(0, 123, 215, .18); transition: transform .2s, box-shadow .2s; }
+.submit-button:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 12px 20px rgba(0, 123, 215, .27); }
+.submit-button:disabled { cursor: wait; opacity: .72; }
+.submit-button span { margin-left: 12px; font-size: 20px; vertical-align: -1px; }
+.divider { display: flex; align-items: center; gap: 13px; margin: 18px 0; color: #65809a; font-size: 9px; }
+.divider::before, .divider::after { content: ''; height: 1px; flex: 1; background: #c8d9e6; }
+.google-button { border: 1px solid #9bb8cf; color: #173653; background: rgba(255,255,255,.18); }
+.google-g { display: inline-block; margin-right: 10px; color: #4285f4; font-size: 17px; font-weight: 700; }
+.signup-prompt { margin: 23px 0 0; color: #536d86; text-align: center; font-size: 10px; }
+.signup-prompt a { font-weight: 700; }
+
+@media (max-width: 820px) {
+	.auth-page { grid-template-columns: 1fr; }
+	.auth-story { min-height: 145px; height: 145px; padding: 25px 28px 45px; align-items: flex-start; }
+	.story-copy { display: none; }
+	.story-features { display: none; }
+	.auth-panel { min-height: calc(100vh - 145px); padding: 14px 20px 24px; align-items: start; }
+	.login-card { margin-top: -42px; }
+}
+
+@media (max-width: 430px) {
+	.auth-story { min-height: 125px; height: 125px; padding: 22px 22px 40px; }
+	.brand-mark { width: 40px; height: 40px; }
+	.brand-mark span { font-size: 30px; }
+	.brand-name { font-size: 26px; }
+	.auth-panel { min-height: calc(100vh - 125px); padding: 12px 14px 18px; }
+	.login-card { padding: 29px 20px 25px; }
+	.auth-input-row { grid-template-columns: 1fr; gap: 13px; }
+}
+
+*{box-sizing:border-box}body{margin:0;font-family:'DM Sans',sans-serif;color:#523c28;background:#e9d5a4}button,input{font:inherit}.guide-shell{min-height:100vh;overflow:hidden;position:relative;background:#f7e9b7;isolation:isolate}.map{position:absolute;inset:0;overflow:hidden;background:radial-gradient(circle at 70% 35%,rgba(255,255,255,.7),transparent 31%),linear-gradient(115deg,#f8e5ad 0 30%,#f9e8b6 30% 48%,#fff3ca 48% 100%);transform:scale(var(--scale));transform-origin:center;transition:transform .25s}.map:before{content:'';position:absolute;inset:0;opacity:.28;background-image:linear-gradient(#b48a5c 1px,transparent 1px),linear-gradient(90deg,#b48a5c 1px,transparent 1px);background-size:112px 112px}.map:after{content:'';position:absolute;inset:7px;border:2px solid rgba(126,82,37,.48);box-shadow:inset 0 0 0 4px rgba(255,240,194,.8),inset 0 0 0 5px rgba(126,82,37,.27);pointer-events:none}.map-lines{position:absolute;width:83%;height:76%;left:18%;top:9%;opacity:.5;background:repeating-linear-gradient(18deg,transparent 0 84px,#c7894d 85px 87px,transparent 88px 144px),repeating-linear-gradient(104deg,transparent 0 115px,#e2a877 116px 118px,transparent 119px 210px)}.coast{position:absolute;border:3px solid rgba(165,124,70,.45);border-right:0;border-bottom:0;transform:rotate(-27deg);border-radius:65% 0 0 0}.coast-one{width:430px;height:510px;left:29%;top:36%}.coast-two{width:210px;height:250px;left:24%;top:57%;transform:rotate(-49deg)}.ocean-label{position:absolute;left:26%;top:64%;color:#07516d;font:600 italic 24px 'Playfair Display';letter-spacing:3px}.table-label,.town{position:absolute;font:700 17px 'Cormorant SC';letter-spacing:2px;color:#5d3e28}.table-label{left:40%;top:50%;font-size:20px}.cape{left:39%;top:41%}.bellville{left:61%;top:36%}.mitchell{left:60%;top:68%}.mountains{position:absolute;left:35%;top:49%;color:#b58f5c;font-size:50px;letter-spacing:-20px;transform:rotate(-4deg)}.masthead{position:absolute;z-index:3;top:11px;left:50%;transform:translateX(-50%);width:318px;text-align:center;padding:8px 14px 10px;background:linear-gradient(90deg,#edc57e,#f5d28d,#e8bb70);border:1px solid #875e32;outline:3px double #f9e1a9;box-shadow:0 4px 8px #6d4a2754;text-transform:uppercase}.masthead h1{margin:0;font:600 21px 'Cormorant SC';letter-spacing:4px}.masthead p{margin:1px 0 0;font:600 12px 'Cormorant SC';letter-spacing:3px}.search-panel{position:absolute;z-index:4;top:79px;left:50%;transform:translateX(-50%);width:min(672px,53vw);height:62px;display:flex;align-items:center;padding:8px;gap:12px;background:linear-gradient(90deg,#f8d188,#ebbd71);border:1px solid #c59357;box-shadow:0 3px 7px #72502a66}.glass{font-size:29px;color:#9a7044;transform:rotate(-20deg)}.search-panel input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:#63482e;font-size:14px}.search-panel input::placeholder{color:#9b7952}.search-button{text-transform:uppercase;letter-spacing:1px;font:700 11px Georgia;padding:11px 16px;border:1px solid #65431f;color:#fce5ae;background:#65421f;cursor:pointer}.locate{width:32px;height:39px;border:1px solid #9e784e;color:#5b442c;background:#f8e5b8;font-size:21px;cursor:pointer}.zoom-controls{position:absolute;z-index:4;left:9px;top:9px;display:grid}.zoom-controls button{width:32px;height:32px;border:1px solid #9a8160;background:#f6e5bf;color:#5d452e;font-size:20px;cursor:pointer}.zoom-controls button+button{border-top:0}.about,.legend{position:absolute;z-index:4;border:1px solid #b48750;outline:2px double #f6d994;background:linear-gradient(145deg,rgba(245,209,144,.92),rgba(235,184,103,.9));box-shadow:1px 2px 7px #86602a4a}.about{bottom:12px;left:13px;width:289px;padding:17px 17px 15px}.about h2,.legend h2{margin:0 0 20px;text-align:center;text-transform:uppercase;font:600 16px 'Cormorant SC';letter-spacing:4px}.about p{margin:0;font:14px/1.65 'Playfair Display'}.motto{border-top:1px solid #bd9460;margin-top:11px;padding-top:10px;text-align:center;color:#8a653d;font:italic 14px/1.4 'Playfair Display'}.legend{right:14px;bottom:12px;width:291px;padding:19px 25px}.legend h2{margin-bottom:18px}.legend button{width:100%;display:flex;align-items:center;border:0;padding:5px 0;text-align:left;background:transparent;color:#503921;font-size:14px;cursor:pointer;border-radius:4px}.legend button:hover,.legend button.active{background:rgba(116,75,35,.12)}.legend i{width:16px;height:20px;margin-right:10px;display:inline-flex;align-items:center;justify-content:center;border:2px solid #e9d4a2;border-radius:50% 50% 50% 0;transform:rotate(-45deg);color:#fff6d2;box-shadow:0 0 0 1px #6d4e2b;font:11px Georgia}.you-are{margin-top:7px;padding-top:10px!important;border-top:1px solid #c99a61!important}.you-are i{background:transparent!important;border:0!important;box-shadow:none!important;color:#dab05f!important;transform:none!important;font-size:17px!important}.markers{position:absolute;inset:0}.pin{position:absolute;z-index:2;width:30px;height:30px;padding:0;border:3px solid #6b4a2c;border-radius:50% 50% 50% 0;background:#eee0af;transform:translate(-50%,-50%) rotate(-45deg);box-shadow:0 2px 0 #6a482a,0 0 0 3px #d7b777;cursor:pointer;transition:transform .15s}.pin:hover,.pin.selected{z-index:3;transform:translate(-50%,-50%) rotate(-45deg) scale(1.18)}.pin i{position:absolute;inset:3px;display:grid;place-items:center;border-radius:50%;transform:rotate(45deg);font:700 13px Georgia;color:#fff6d8;background:var(--pin);font-style:normal}.place-card{position:absolute;z-index:5;width:190px;padding:11px 26px 11px 12px;background:#f7d990;border:1px solid #8d6337;box-shadow:0 2px 6px #5f402c66;font-size:12px}.place-card strong{display:block;font-family:'Playfair Display'}.place-card span{color:#88613c}.place-card button{position:absolute;right:5px;top:2px;border:0;background:transparent;color:#5e3e24;cursor:pointer;font-size:18px}.map-tools{position:absolute;z-index:5;bottom:10px;left:50%;transform:translateX(-50%);padding:5px 9px;border-radius:20px;background:#fff5cb;box-shadow:0 1px 4px #80613555}.map-tools button{border:0;background:transparent;color:#574532;padding:2px 9px;cursor:pointer}.notice{position:absolute;z-index:7;top:149px;left:50%;transform:translateX(-50%);padding:8px 16px;background:#6b4928;color:#ffedb9;box-shadow:0 2px 5px #5b3d2c66;font-size:13px}@media(max-width:780px){.search-panel{width:calc(100% - 84px);top:74px}.legend{display:none}.about{width:min(289px,calc(100% - 24px))}.masthead{width:270px}.pin{width:25px;height:25px}.map{transform:scale(1)}.table-label,.town{font-size:12px}}
+/* Leaflet live map */
+.leaflet-map{position:absolute;inset:0;z-index:0;background:#f4e4af}.leaflet-map .leaflet-tile{filter:sepia(.55) saturate(.65) brightness(1.12) contrast(.86)}.leaflet-map .leaflet-control-attribution{background:rgba(249,232,185,.78)!important;color:#755536;font-size:10px}.masthead,.search-panel,.about,.legend,.notice,.leaflet-zoom{z-index:1000}.leaflet-zoom{position:absolute;left:9px;top:9px;display:grid}.leaflet-zoom button{width:32px;height:32px;border:1px solid #9a8160;background:#f6e5bf;color:#5d452e;font-size:20px;cursor:pointer}.leaflet-zoom button+button{border-top:0}.cape-marker-wrap{background:none!important;border:0!important}.cape-marker{width:30px;height:30px;border:3px solid #6b4a2c;border-radius:50% 50% 50% 0;background:#eee0af;transform:rotate(-45deg);box-shadow:0 2px 0 #6a482a,0 0 0 3px #d7b777}.cape-marker span{position:absolute;inset:3px;display:grid;place-items:center;border-radius:50%;transform:rotate(45deg);font:700 13px Georgia;color:#fff6d8;background:var(--marker)}.leaflet-tooltip{border:1px solid #8d6337!important;border-radius:0!important;background:#f7d990!important;color:#553b24!important;box-shadow:0 2px 6px #5f402c66!important;font:12px 'DM Sans',sans-serif!important}.leaflet-tooltip:before{border-top-color:#8d6337!important}.leaflet-tooltip strong{font-family:'Playfair Display'}
+.glass{display:flex;align-items:center}.legend i svg{transform:rotate(45deg)}.you-are i svg{transform:none}.leaflet-zoom button{display:grid;place-items:center}.traffic-marker-wrap{background:none!important;border:0!important}.traffic-marker{width:30px;height:30px;display:grid;place-items:center;border:2px solid #5b341d;border-radius:50%;box-shadow:0 2px 0 #5b341d;color:#fff7df}.traffic-marker svg{display:block;stroke:currentColor}.traffic-marker.traffic{background:#b5362d}.traffic-marker.road-works{background:#c56a24}
+.panel-trigger{position:absolute;z-index:1100;display:flex;align-items:center;gap:8px;padding:10px 14px;border:1px solid #8c6337;outline:2px double #f6d994;background:linear-gradient(145deg,#f4d18c,#e6b466);color:#52391f;box-shadow:1px 2px 7px #86602a70;text-transform:uppercase;font:600 12px 'Cormorant SC';letter-spacing:1.8px;cursor:pointer}.panel-trigger:hover{background:#f8d991}.about-trigger{left:14px;bottom:14px}.legend-trigger{right:14px;bottom:14px}.popup-panel{z-index:1200!important;animation:panel-pop .2s ease-out}.close-panel,.legend .close-panel{position:absolute;right:8px;top:8px;width:29px;height:29px;display:grid;place-items:center;margin:0;padding:0;border:0!important;background:transparent!important;color:#624422;cursor:pointer}.close-panel:hover,.legend .close-panel:hover{background:rgba(103,67,31,.12)!important}@keyframes panel-pop{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
+.service-popup{position:absolute;z-index:1150;left:12px;bottom:12px;width:min(455px,calc(100% - 24px));padding:17px 18px 18px;background:linear-gradient(135deg,#f4d48f,#e8b866);border:1px solid #8f6335;outline:3px double #f8dfa8;box-shadow:2px 3px 9px #5f43277a;animation:panel-pop .2s ease-out}.service-close{position:absolute;right:12px;top:11px;border:0;background:transparent;color:#664526;cursor:pointer}.service-title{display:flex;align-items:center;gap:11px;padding:0 25px 12px 0;border-bottom:1px solid #c39358}.service-icon{width:28px;height:35px;display:grid;place-items:center;border:3px solid #694927;border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 1px 0 #6b482a,0 0 0 2px #dfc181;color:#fff6d8}.service-icon svg{transform:rotate(45deg)}.service-title h2{margin:0;text-transform:uppercase;font:600 18px 'Cormorant SC';letter-spacing:2px}.service-title p{margin:2px 0 0;text-transform:uppercase;color:#85603a;font:600 11px 'Cormorant SC';letter-spacing:2px}.service-info{padding:11px 0 8px}.service-info p{display:flex;align-items:center;gap:9px;margin:5px 0;color:#594027;font:14px/1.35 'DM Sans'}.service-info svg{color:#987047;flex:none}.service-actions{display:flex;gap:8px;border-top:1px solid #c39358;padding-top:11px}.service-actions button{display:flex;align-items:center;justify-content:center;gap:6px;min-height:33px;padding:0 13px;border:1px solid #b78955;background:#f7e7bd;color:#674a2e;text-transform:uppercase;font:600 11px 'Cormorant SC';letter-spacing:1.5px;cursor:pointer}.service-actions .directions{background:#714621;color:#ffe6af;border-color:#70441f}.service-actions .saved{background:#dfb162;color:#5b3b1d}@media(max-width:520px){.service-popup{bottom:9px;padding:14px}.service-title h2{font-size:15px}.service-actions{gap:4px}.service-actions button{padding:0 8px;font-size:10px}}
+.service-popup{left:50%!important;top:auto!important;bottom:12px!important;transform:translateX(-50%);z-index:1150!important}.service-popup .service-close{z-index:1}@media(max-width:780px){.service-popup{bottom:58px!important}}@media(max-width:520px){.service-popup{bottom:9px!important}}
+
+/* Authentication: antique-map parchment treatment */
+.auth-page{--ink:#4a2b16;--line:#8b5a2b;min-height:100vh;position:relative;overflow:hidden;grid-template-columns:minmax(440px,1.2fr) minmax(420px,.8fr);color:var(--ink);background:radial-gradient(circle at 30% 68%,rgba(78,132,136,.52),transparent 23%),radial-gradient(circle at 70% 30%,rgba(255,244,202,.8),transparent 35%),repeating-linear-gradient(35deg,rgba(104,62,27,.05) 0 1px,transparent 1px 5px),#e8bd78}.auth-page:before{content:'';position:absolute;inset:12px;z-index:3;pointer-events:none;border:2px solid rgba(75,41,16,.75);outline:1px solid rgba(252,219,155,.88);box-shadow:inset 0 0 0 5px rgba(86,45,17,.18),inset 0 0 45px rgba(88,46,15,.35)}.auth-story{min-height:100vh;position:relative;display:flex;align-items:center;justify-content:center;padding:70px clamp(36px,7vw,105px);color:var(--ink);background:linear-gradient(105deg,transparent 6%,rgba(234,198,125,.1) 60%,rgba(115,71,29,.15)),radial-gradient(ellipse at 25% 71%,rgba(59,112,125,.65) 0 19%,transparent 19.5%),repeating-radial-gradient(ellipse at 18% 72%,rgba(52,101,115,.32) 0 1px,transparent 2px 9px)}.auth-story:after{content:'N  ✦  E';position:absolute;top:8%;left:8%;width:108px;height:108px;display:grid;place-items:center;border:2px solid #5b3418;border-radius:50%;color:#593317;font:bold 15px Georgia;letter-spacing:8px;box-shadow:0 0 0 6px rgba(90,51,20,.13)}.story-content{max-width:560px;text-align:left;align-items:flex-start}.brand{display:flex;flex-direction:column;align-items:flex-start;gap:10px;color:var(--ink);text-transform:uppercase;margin-right:auto}.brand-mark{width:96px;height:96px;background:none!important;box-shadow:none!important;transform:none!important;color:var(--ink);font-size:32px;line-height:.7;display:grid;place-items:center}.brand-mark span{display:none}.brand-mark:before{content:'✦'}.brand-mark svg{width:96px;height:96px;display:block}.brand-name{font:600 clamp(33px,4vw,59px)/.9 Georgia,serif;letter-spacing:3px;text-shadow:1px 1px #f7d996}.brand-name span{color:inherit}.story-copy{margin-top:clamp(65px,11vh,120px)}.eyebrow{margin:0 0 18px;color:var(--ink);font:600 12px Georgia,serif;letter-spacing:3px}.eyebrow span{color:inherit}.story-copy h1{margin:0;color:var(--ink);font:italic clamp(30px,3.7vw,50px)/1.12 Georgia,serif;letter-spacing:0}.story-copy h1 strong{color:inherit}.story-description{margin:20px auto 0;color:var(--ink);font:italic 16px/1.55 Georgia,serif}.story-features{justify-content:center;margin-top:55px}.story-feature{min-width:132px;border-left:1px solid rgba(80,42,15,.45)}.story-feature strong{font:600 14px Georgia,serif;letter-spacing:1px}.story-feature small{color:var(--ink);font:italic 11px Georgia,serif}.feature-icon{color:var(--ink)}.auth-panel{padding:44px clamp(24px,5vw,86px);background:rgba(216,168,95,.2)}.login-card{width:min(100%,505px);padding:54px clamp(28px,5vw,58px) 42px;border:1px solid var(--line);border-left:1px solid var(--line);border-radius:0;outline:4px double rgba(112,65,26,.72);outline-offset:-9px;background:radial-gradient(circle at 70% 12%,rgba(255,249,216,.82),transparent 40%),repeating-linear-gradient(-35deg,rgba(106,57,20,.035) 0 1px,transparent 1px 5px),#f4d99e;box-shadow:13px 16px 0 rgba(88,47,16,.27),0 18px 34px rgba(58,31,11,.38)}.login-card:before{content:'✥';top:19px;right:auto;left:50%;width:auto;height:auto;border:0;border-radius:0;box-shadow:none;transform:translateX(-50%);color:#70421d;font-size:30px}.login-card:after{content:'';position:absolute;top:48px;left:14%;right:14%;height:1px;background:linear-gradient(90deg,transparent,#966338 18% 82%,transparent)}.panel-kicker{margin:8px 0 10px;color:var(--ink);text-align:center;font:600 10px Georgia,serif;letter-spacing:2.5px}.login-heading h2{color:var(--ink);text-align:center;text-transform:uppercase;font:500 clamp(25px,3vw,34px) Georgia,serif;letter-spacing:3px}.login-heading p{color:#60401f;text-align:center;font:italic 14px/1.45 Georgia,serif}.field-label{position:static;display:block;width:auto;height:auto;margin:0 0 6px;overflow:visible;clip:auto;color:#54331b;text-transform:uppercase;font:600 11px Georgia,serif;letter-spacing:1.5px}.auth-field{min-width:0}.auth-input,.input-wrap input{height:43px;border:1px solid #9a6634;border-radius:3px;color:#4b2c16;background:rgba(255,238,191,.43);font:14px Georgia,serif}.auth-input:focus,.input-wrap input:focus{border-color:#603210;box-shadow:0 0 0 3px rgba(121,72,28,.16)}.auth-input::placeholder,.input-wrap input::placeholder{color:#8b6a49}.input-wrap input{padding:0 42px}.input-icon{top:11px;color:#58351b}.visibility-button{height:43px;color:#58351b}.form-options{color:#60401f;font:13px Georgia,serif}.form-options a,.signup-prompt a{color:#62320f}.remember-option input{accent-color:#6a3b14}.submit-button,.google-button{height:48px;border-radius:3px;text-transform:uppercase;letter-spacing:2px;font:600 13px Georgia,serif}.submit-button{border:1px solid #44200b;background:linear-gradient(105deg,#45200b,#6d3917);box-shadow:inset 0 0 0 2px rgba(255,210,133,.37),0 3px 5px rgba(66,31,10,.3)}.google-button{border:1px solid #9a6634;color:#4a2b16;background:rgba(255,237,189,.45)}.divider{color:#60401f;font:12px Georgia,serif}.divider:before,.divider:after{background:#b47c43}.signup-prompt{color:#60401f;font:13px Georgia,serif}.form-error,.form-success{border-radius:2px;border-color:#9c6840;background:rgba(255,238,190,.67);font:12px/1.4 Georgia,serif}
+@media(max-width:820px){.auth-page{grid-template-columns:1fr}.auth-story{min-height:200px;height:200px;padding:24px 28px;align-items:flex-end}.auth-story:after{transform:scale(.62);transform-origin:top left;top:30px;left:36px}.story-copy,.story-features{display:none}.brand-name{font-size:38px}.auth-panel{min-height:calc(100vh - 200px);padding:22px 20px 30px;align-items:start}.login-card{margin-top:-47px}}@media(max-width:430px){.auth-story{min-height:170px;height:170px}.auth-panel{min-height:calc(100vh - 170px);padding:14px}.login-card{padding:50px 22px 28px}.auth-input-row{grid-template-columns:1fr}.form-options{font-size:11px}}
+
+/* The real guide map remains pannable around the authentication card. */
+.auth-map{position:absolute!important;inset:-12px!important;z-index:0!important;filter:sepia(.56) saturate(.62) brightness(1.08) contrast(.87) blur(1.6px);transform:scale(1.025);background:#d7b16e}.auth-map:after{content:'';position:absolute;inset:0;z-index:500;pointer-events:none;background:linear-gradient(90deg,rgba(237,202,130,.27),rgba(238,205,137,.16) 52%,rgba(101,59,25,.17)),repeating-linear-gradient(38deg,rgba(91,50,19,.06) 0 1px,transparent 1px 6px)}.auth-page{isolation:isolate}.auth-story,.auth-panel{z-index:1;pointer-events:none;background:transparent}.story-content,.login-card{pointer-events:auto}.auth-panel{background:linear-gradient(90deg,rgba(242,211,151,.08),rgba(232,192,119,.34))}.auth-story{background:linear-gradient(105deg,rgba(239,207,140,.2),rgba(238,202,130,.04) 58%,rgba(115,71,29,.12)),radial-gradient(ellipse at 25% 71%,rgba(59,112,125,.19) 0 19%,transparent 19.5%)}
+.auth-story:after{display:none}.brand-mark:before{display:none}.brand-mark svg{width:74px;height:74px}.feature-icon{width:27px;height:27px;margin:0 auto 8px}.auth-page .feature-icon{font-size:inherit}
+>>>>>>> b526a829881dfbcf150f1a74a5c94a1c1c911258
 </file>
 
 <file path=".gitignore">
@@ -4804,7 +5419,7 @@ export async function getServices(req: Request, res: Response, next: NextFunctio
 		const search = typeof req.query.q === 'string' ? req.query.q.trim() : undefined
 		const requestedLimit = Number(req.query.limit ?? 100)
 		const limit = Number.isInteger(requestedLimit)
-			? Math.min(Math.max(requestedLimit, 1), 500)
+			? Math.min(Math.max(requestedLimit, 1), 1000)
 			: 100
 
 		let query = supabase
@@ -4892,19 +5507,23 @@ export const updateService = async (req: Request, res: Response, next: NextFunct
 </file>
 
 <file path="frontend/src/App.tsx">
+<<<<<<< HEAD
 import Login from './pages/Login';
+=======
+>>>>>>> b526a829881dfbcf150f1a74a5c94a1c1c911258
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import Login from './pages/Login';
 import Signup from './pages/Signup';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
-import Dashboard from './pages/Dashboard';
+<<<<<<< HEAD
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
-  Accessibility, BookOpen, Bookmark, Bus, Clock3, Flame, Globe,
-  GraduationCap, Heart, Hospital, House, Landmark, Library, LocateFixed,
-  MapPinned, Minus, Navigation, Phone, Pill, Plus, Search, Shield,
-  ShoppingBag, Smile, Stethoscope, X,
+  Accessibility, BookOpen, Bookmark, Clock3, Flame, Globe, GraduationCap,
+  Heart, Hospital, House, Landmark, Library, LocateFixed, MapPinned, Minus,
+  Navigation, Phone, Pill, Plus, Search, Shield, ShoppingBag, Smile,
+  Stethoscope, X,
 } from 'lucide-react';
 import Navbar from './components/common/Navbar';
 import { useServices } from './hooks/useServices';
@@ -4951,6 +5570,9 @@ function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number):
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
+const formatDistance = (m: number) =>
+  m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
+
 const toPlace = (service: Service): Place | null => {
   const coordinates = getCoordinates(service.location);
   if (!coordinates || coordinates.some((coordinate) => !Number.isFinite(coordinate))) return null;
@@ -4981,7 +5603,7 @@ const categoryIcon = (category: Category, size = 14) => {
 
 function LeafletMap({
   places, selected, onSelect, mapRef,
-  userLocation, radiusMeters,
+  userLocation, radiusMeters, routeTarget,
 }: {
   places: Place[];
   selected: Place | null;
@@ -4989,12 +5611,15 @@ function LeafletMap({
   mapRef: React.MutableRefObject<any>;
   userLocation: UserLocation | null;
   radiusMeters: number | null;
+  routeTarget: Place | null;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const layer = useRef<any>(null);
   const userMarker = useRef<any>(null);
   const accuracyCircle = useRef<any>(null);
   const radiusCircle = useRef<any>(null);
+  const routeLine = useRef<any>(null);
+  const lastRouteKey = useRef<string>('');
 
   useEffect(() => {
     if (!root.current || !L) return;
@@ -5025,7 +5650,6 @@ function LeafletMap({
       marker.bindTooltip(`<strong>${place.name}</strong><br>${place.category}`, { direction: 'top', offset: [0, -38] });
       marker.on('click', () => onSelect(place));
     });
-    // Only auto-fit if the user hasn't activated tracking/radius
     if (places.length > 0 && !userLocation) {
       mapRef.current?.fitBounds(
         L.latLngBounds(places.map((place) => [place.lat, place.lng])),
@@ -5034,7 +5658,6 @@ function LeafletMap({
     }
   }, [places, selected, onSelect, userLocation]);
 
-  // User position dot + accuracy circle
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !L) return;
@@ -5055,12 +5678,8 @@ function LeafletMap({
       });
       userMarker.current = L.marker([lat, lng], { icon, zIndexOffset: 1000 }).addTo(map);
       accuracyCircle.current = L.circle([lat, lng], {
-        radius: accuracy,
-        color: '#22c55e',
-        weight: 1,
-        fillColor: '#22c55e',
-        fillOpacity: 0.12,
-        interactive: false,
+        radius: accuracy, color: '#22c55e', weight: 1,
+        fillColor: '#22c55e', fillOpacity: 0.12, interactive: false,
       }).addTo(map);
     } else {
       userMarker.current.setLatLng([lat, lng]);
@@ -5069,7 +5688,6 @@ function LeafletMap({
     }
   }, [userLocation, mapRef]);
 
-  // Radius filter circle
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !L) return;
@@ -5080,12 +5698,8 @@ function LeafletMap({
     const center: [number, number] = [userLocation.lat, userLocation.lng];
     if (!radiusCircle.current) {
       radiusCircle.current = L.circle(center, {
-        radius: radiusMeters,
-        color: '#005a8a',
-        weight: 1,
-        fillColor: '#08aef0',
-        fillOpacity: 0.08,
-        interactive: false,
+        radius: radiusMeters, color: '#005a8a', weight: 1,
+        fillColor: '#08aef0', fillOpacity: 0.08, interactive: false,
       }).addTo(map);
     } else {
       radiusCircle.current.setLatLng(center);
@@ -5093,21 +5707,84 @@ function LeafletMap({
     }
   }, [userLocation, radiusMeters, mapRef]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !L) return;
+
+    if (!userLocation || !routeTarget) {
+      if (routeLine.current) { map.removeLayer(routeLine.current); routeLine.current = null; }
+      lastRouteKey.current = '';
+      return;
+    }
+
+    const key = `${routeTarget.lat.toFixed(4)},${routeTarget.lng.toFixed(4)}|${userLocation.lat.toFixed(3)},${userLocation.lng.toFixed(3)}`;
+    if (key === lastRouteKey.current && routeLine.current) return;
+    lastRouteKey.current = key;
+
+    const controller = new AbortController();
+    const from = `${userLocation.lng},${userLocation.lat}`;
+    const to = `${routeTarget.lng},${routeTarget.lat}`;
+    const url = `https://router.project-osrm.org/route/v1/driving/${from};${to}?overview=full&geometries=geojson`;
+
+    fetch(url, { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error('Routing request failed');
+        return res.json();
+      })
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        const coords = data?.routes?.[0]?.geometry?.coordinates?.map(
+          (c: [number, number]) => [c[1], c[0]] as [number, number],
+        ) ?? null;
+        const latlngs: [number, number][] = coords && coords.length > 1
+          ? coords
+          : [[userLocation.lat, userLocation.lng], [routeTarget.lat, routeTarget.lng]];
+
+        if (!routeLine.current) {
+          routeLine.current = L.polyline(latlngs, { color: '#1f9450', weight: 5, opacity: 0.9 }).addTo(map);
+        } else {
+          routeLine.current.setLatLngs(latlngs);
+        }
+
+        try {
+          map.fitBounds(L.latLngBounds(latlngs), { padding: [48, 48], maxZoom: 16, animate: true });
+        } catch { /* ignore */ }
+      })
+      .catch((err) => {
+        if (err?.name === 'AbortError') return;
+        const latlngs: [number, number][] = [
+          [userLocation.lat, userLocation.lng],
+          [routeTarget.lat, routeTarget.lng],
+        ];
+        if (!routeLine.current) {
+          routeLine.current = L.polyline(latlngs, {
+            color: '#1f9450', weight: 5, opacity: 0.9, dashArray: '8 10',
+          }).addTo(map);
+        } else {
+          routeLine.current.setLatLngs(latlngs);
+        }
+      });
+
+    return () => controller.abort();
+  }, [userLocation, routeTarget, mapRef]);
+
   return <div className="leaflet-map" ref={root} />;
 }
 
 function CapeGuide() {
-  const { services,   loading, error } = useServices();
-  const [query,       setQuery] =       useState('');
-  const [active,      setActive] =      useState<Category | null>(null);
-  const [selected,    setSelected] =    useState<Place | null>(null);
-  const [notice,      setNotice] =      useState('');
-  const [aboutOpen,   setAboutOpen] =   useState(false);
-  const [legendOpen,  setLegendOpen] =  useState(false);
-  const [saved,       setSaved] =       useState<string[]>([]);
+  const { services, loading, error } = useServices();
+  const [query,        setQuery]        = useState('');
+  const [active,       setActive]       = useState<Category | null>(null);
+  const [selected,     setSelected]     = useState<Place | null>(null);
+  const [notice,       setNotice]       = useState('');
+  const [aboutOpen,    setAboutOpen]    = useState(false);
+  const [legendOpen,   setLegendOpen]   = useState(false);
+  const [saved,        setSaved]        = useState<string[]>([]);
   const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
-  const [tracking,    setTracking] =    useState(false);
+  const [tracking,     setTracking]     = useState(false);
   const [radiusMeters, setRadiusMeters] = useState<number | null>(2000);
+  const [resultsOpen,  setResultsOpen]  = useState(false);
+  const [routeTarget,  setRouteTarget]  = useState<Place | null>(null);
   const mapRef =      useRef<any>(null);
   const watchId =     useRef<number | null>(null);
   const hasCentered = useRef(false);
@@ -5123,11 +5800,19 @@ function CapeGuide() {
     [places],
   );
 
+  const matchesQuery = useCallback((place: Place, q: string) => {
+    const term = q.trim().toLowerCase();
+    if (!term) return true;
+    const haystack = `${place.name} ${place.formatted_address ?? ''} ${place.category}`.toLowerCase();
+    if (haystack.includes(term)) return true;
+    const categoryWords = place.category.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/);
+    return categoryWords.some((word) => word.startsWith(term) || term.startsWith(word));
+  }, []);
+
   const visible = useMemo(() => {
     const filtered = places.filter((p) => {
       if (active && p.category !== active) return false;
-      if (query && !`${p.name} ${p.formatted_address ?? ''} ${p.category}`
-        .toLowerCase().includes(query.toLowerCase())) return false;
+      if (!matchesQuery(p, query)) return false;
       if (userLocation && radiusMeters !== null) {
         const d = distanceMeters(userLocation.lat, userLocation.lng, p.lat, p.lng);
         if (d > radiusMeters) return false;
@@ -5143,7 +5828,23 @@ function CapeGuide() {
     }
 
     return filtered;
-  }, [active, places, query, userLocation, radiusMeters]);
+  }, [active, places, query, userLocation, radiusMeters, matchesQuery]);
+
+  // Search dropdown shows ALL matches (ignores radius so users can find far places too)
+  const sortedResults = useMemo(() => {
+    const list = places.filter((p) =>
+      (!active || p.category === active) && matchesQuery(p, query)
+    );
+    if (userLocation) {
+      list.sort((a, b) =>
+        distanceMeters(userLocation.lat, userLocation.lng, a.lat, a.lng) -
+        distanceMeters(userLocation.lat, userLocation.lng, b.lat, b.lng)
+      );
+    } else {
+      list.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return list;
+  }, [places, active, query, userLocation, matchesQuery]);
 
   const selectPlace = useCallback((place: Place) => {
     setSelected(place);
@@ -5151,9 +5852,11 @@ function CapeGuide() {
   }, []);
 
   const search = () => {
-    const first = visible[0];
+    const first = sortedResults[0];
     if (first) selectPlace(first);
-    setNotice(first ? `${visible.length} place${visible.length === 1 ? '' : 's'} found` : 'No places found');
+    setNotice(first
+      ? `${sortedResults.length} place${sortedResults.length === 1 ? '' : 's'} found`
+      : 'No places found');
   };
 
   useEffect(
@@ -5174,6 +5877,7 @@ function CapeGuide() {
       hasCentered.current = false;
       setTracking(false);
       setUserLocation(null);
+      setRouteTarget(null);
       setNotice('Live location turned off.');
       return;
     }
@@ -5199,6 +5903,12 @@ function CapeGuide() {
     );
   };
 
+  const getDirections = (place: Place) => {
+    setRouteTarget(place);
+    if (!tracking) locate();
+    setNotice(`Getting road directions to ${place.name}...`);
+  };
+
   const clearFilter = () => {
     setRadiusMeters(null);
     setNotice('Showing all services.');
@@ -5216,6 +5926,7 @@ function CapeGuide() {
           mapRef={mapRef}
           userLocation={userLocation}
           radiusMeters={radiusMeters}
+          routeTarget={routeTarget}
         />
 
         <header className="masthead">
@@ -5227,11 +5938,18 @@ function CapeGuide() {
           <span className="glass"><Search size={19} /></span>
           <input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && search()}
+            onChange={(e) => { setQuery(e.target.value); setResultsOpen(true); }}
+            onFocus={() => query.trim() && setResultsOpen(true)}
+            onBlur={() => setTimeout(() => setResultsOpen(false), 150)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { search(); setResultsOpen(false); }
+              if (e.key === 'Escape') setResultsOpen(false);
+            }}
             placeholder="Search for a place or service..."
           />
-          <button className="search-button" onClick={search}>Search</button>
+          <button className="search-button" onClick={() => { search(); setResultsOpen(false); }}>
+            Search
+          </button>
           <button
             className={`locate${tracking ? ' active' : ''}`}
             title={tracking ? 'Stop live location' : 'Show my live location'}
@@ -5240,6 +5958,54 @@ function CapeGuide() {
             <LocateFixed size={17} />
           </button>
         </section>
+
+        {resultsOpen && query.trim() && (
+          <div className="search-results" onMouseDown={(e) => e.preventDefault()}>
+            {sortedResults.length === 0 ? (
+              <div className="search-results-empty">No places found</div>
+            ) : (
+              sortedResults.slice(0, 20).map((place) => (
+                <div
+                  key={place.id}
+                  className="search-result-row"
+                  onClick={() => {
+                    selectPlace(place);
+                    setQuery(place.name);
+                    setResultsOpen(false);
+                  }}
+                >
+                  <span
+                    className="search-result-icon"
+                    style={{ background: categoryColor(place.category) }}
+                  >
+                    {categoryIcon(place.category, 14)}
+                  </span>
+                  <div className="search-result-info">
+                    <strong>{place.name}</strong>
+                    <span>
+                      {place.category}
+                      {userLocation
+                        ? ` · ${formatDistance(distanceMeters(userLocation.lat, userLocation.lng, place.lat, place.lng))} away`
+                        : ''}
+                    </span>
+                  </div>
+                  <button
+                    className="search-result-directions"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      getDirections(place);
+                      setQuery(place.name);
+                      setResultsOpen(false);
+                    }}
+                  >
+                    <Navigation size={13} />
+                    Directions
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        )}
 
         {loading && <div className="notice">Loading services...</div>}
         {error && <div className="notice">{error}</div>}
@@ -5271,7 +6037,7 @@ function CapeGuide() {
               <X size={18} />
             </button>
             <div className="service-title">
-              <span className="service-icon" style={{ background: categories.find((c) => c.name === selected.category)?.color }}>
+              <span className="service-icon" style={{ background: categoryColor(selected.category) }}>
                 {categoryIcon(selected.category, 18)}
               </span>
               <div>
@@ -5287,14 +6053,16 @@ function CapeGuide() {
               {selected.wheelchair && <p><Accessibility size={17} />Wheelchair access: {selected.wheelchair}</p>}
             </div>
             <div className="service-actions">
-              <button className="directions" onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${selected.lat},${selected.lng}`, '_blank', 'noopener,noreferrer')}>
+              <button className="directions" onClick={() => getDirections(selected)}>
                 <Navigation size={14} /> Get Directions
               </button>
               <button
-                className={saved.includes(selected.name) ? 'saved' : ''}
-                onClick={() => setSaved(saved.includes(selected.name) ? saved.filter((name) => name !== selected.name) : [...saved, selected.name])}
+                className={saved.includes(selected.id) ? 'saved' : ''}
+                onClick={() => setSaved(saved.includes(selected.id)
+                  ? saved.filter((id) => id !== selected.id)
+                  : [...saved, selected.id])}
               >
-                <Bookmark size={15} /> {saved.includes(selected.name) ? 'Saved' : 'Save'}
+                <Bookmark size={15} /> {saved.includes(selected.id) ? 'Saved' : 'Save'}
               </button>
             </div>
           </section>
@@ -5352,7 +6120,7 @@ function CapeGuide() {
 
 function ProtectedDashboard() {
   const accessToken = localStorage.getItem('servicefinder_access_token');
-  return accessToken ? <Dashboard /> : <Navigate to="/login" replace />;
+  return accessToken ? <CapeGuide /> : <Navigate to="/login" replace />;
 }
 
 export default function App() {
@@ -5370,6 +6138,28 @@ export default function App() {
     </BrowserRouter>
   );
 }
+=======
+import Dashboard from './pages/Dashboard';
+
+function ProtectedDashboard() {
+  return localStorage.getItem('servicefinder_access_token')
+    ? <Dashboard />
+    : <Navigate to="/login" replace />;
+}
+
+function App() {
+  return <BrowserRouter><Routes>
+    <Route path="/login" element={<Login />} />
+    <Route path="/signup" element={<Signup />} />
+    <Route path="/forgot-password" element={<ForgotPassword />} />
+    <Route path="/reset-password" element={<ResetPassword />} />
+    <Route path="/dashboard" element={<ProtectedDashboard />} />
+    <Route path="*" element={<Navigate to="/login" replace />} />
+  </Routes></BrowserRouter>;
+}
+
+export default App;
+>>>>>>> b526a829881dfbcf150f1a74a5c94a1c1c911258
 </file>
 
 </files>
