@@ -29,9 +29,9 @@ function LoginForm() {
 	return (
 		<div className="login-card" aria-labelledby="login-title">
 				<div className="login-heading">
-					<p className="panel-kicker">SERVICEFINDER ACCOUNT</p>
+					<p className="panel-kicker">THE CAPE GUIDE</p>
 					<h2 id="login-title">Welcome Back</h2>
-					<p>Log in to your ServiceFinder account<br />to continue.</p>
+					<p>Log in to your Cape Guide account<br />to continue.</p>
 				</div>
 
 				<form onSubmit={async (event) => {

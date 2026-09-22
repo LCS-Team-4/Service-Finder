@@ -52,29 +52,23 @@ function Signup() {
 	}
 
 	return (
-		<AuthLayout label="Create your ServiceFinder account">
+		<AuthLayout label="Create your Cape Guide account">
 			<div className="login-card auth-form-card">
 				<div className="login-heading">
-					<p className="panel-kicker">SERVICEFINDER ACCOUNT</p>
+					<p className="panel-kicker">THE CAPE GUIDE</p>
 					<h2>Create Account</h2>
-					<p>Join ServiceFinder to find essential services<br />near you.</p>
+					<p>Join The Cape Guide to find essential services<br />near you.</p>
 				</div>
 				<form onSubmit={handleSubmit} noValidate>
 					{message && <p className={isSuccess ? 'form-success' : 'form-error'} role="alert">{message}</p>}
 					<div className="auth-input-row">
-						<label className="field-label" htmlFor="signup-first-name">First name</label>
-						<input className="auth-input" id="signup-first-name" type="text" value={form.firstName} onChange={(event) => updateField('firstName', event.target.value)} placeholder="First name" autoComplete="given-name" />
-						<label className="field-label" htmlFor="signup-last-name">Last name</label>
-						<input className="auth-input" id="signup-last-name" type="text" value={form.lastName} onChange={(event) => updateField('lastName', event.target.value)} placeholder="Last name" autoComplete="family-name" />
+						<div className="auth-field"><label className="field-label" htmlFor="signup-first-name">First name</label><input className="auth-input" id="signup-first-name" type="text" value={form.firstName} onChange={(event) => updateField('firstName', event.target.value)} placeholder="First name" autoComplete="given-name" /></div>
+						<div className="auth-field"><label className="field-label" htmlFor="signup-last-name">Last name</label><input className="auth-input" id="signup-last-name" type="text" value={form.lastName} onChange={(event) => updateField('lastName', event.target.value)} placeholder="Last name" autoComplete="family-name" /></div>
 					</div>
-					<label className="field-label" htmlFor="signup-phone">Phone number</label>
-					<input className="auth-input" id="signup-phone" type="tel" value={form.phoneNumber} onChange={(event) => updateField('phoneNumber', event.target.value)} placeholder="Phone number" autoComplete="tel" />
-					<label className="field-label" htmlFor="signup-email">Email address</label>
-					<input className="auth-input" id="signup-email" type="email" value={form.email} onChange={(event) => updateField('email', event.target.value)} placeholder="Email address" autoComplete="email" />
-					<label className="field-label" htmlFor="signup-password">Password</label>
-					<input className="auth-input" id="signup-password" type="password" value={form.password} onChange={(event) => updateField('password', event.target.value)} placeholder="Password" autoComplete="new-password" />
-					<label className="field-label" htmlFor="signup-confirm-password">Confirm password</label>
-					<input className="auth-input" id="signup-confirm-password" type="password" value={form.confirmPassword} onChange={(event) => updateField('confirmPassword', event.target.value)} placeholder="Confirm password" autoComplete="new-password" />
+					<div className="auth-field"><label className="field-label" htmlFor="signup-phone">Phone number</label><input className="auth-input" id="signup-phone" type="tel" value={form.phoneNumber} onChange={(event) => updateField('phoneNumber', event.target.value)} placeholder="Phone number" autoComplete="tel" /></div>
+					<div className="auth-field"><label className="field-label" htmlFor="signup-email">Email address</label><input className="auth-input" id="signup-email" type="email" value={form.email} onChange={(event) => updateField('email', event.target.value)} placeholder="Email address" autoComplete="email" /></div>
+					<div className="auth-field"><label className="field-label" htmlFor="signup-password">Password</label><input className="auth-input" id="signup-password" type="password" value={form.password} onChange={(event) => updateField('password', event.target.value)} placeholder="Password" autoComplete="new-password" /></div>
+					<div className="auth-field"><label className="field-label" htmlFor="signup-confirm-password">Confirm password</label><input className="auth-input" id="signup-confirm-password" type="password" value={form.confirmPassword} onChange={(event) => updateField('confirmPassword', event.target.value)} placeholder="Confirm password" autoComplete="new-password" /></div>
 					<button className="submit-button" type="submit">Create Account <span aria-hidden="true">→</span></button>
 				</form>
 				<p className="signup-prompt">Already have an account? <Link to="/login">Log In</Link></p>

@@ -33,7 +33,7 @@ function ForgotPassword() {
 	}
 
 	return (
-		<AuthLayout label="Reset your ServiceFinder password">
+		<AuthLayout label="Reset your Cape Guide password">
 			<div className="login-card auth-form-card">
 				<div className="login-heading">
 					<p className="panel-kicker">ACCOUNT RECOVERY</p>

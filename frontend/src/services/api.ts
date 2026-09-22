@@ -1,6 +1,8 @@
+import type { Service } from '../types/service.types';
 import type { TrafficIncident } from '../types/traffic.types';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+const configuredApiUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api').replace(/\/+$/, '');
+const API_BASE_URL = configuredApiUrl.endsWith('/api') ? configuredApiUrl : `${configuredApiUrl}/api`;
 
 type ApiError = { error?: string };
 
@@ -36,12 +38,6 @@ export type AuthResponse = {
   needsEmailConfirmation?: boolean;
 };
 
-export async function getTrafficIncidents(): Promise<TrafficIncident[]> {
-  const response = await fetch(`${API_BASE_URL}/traffic-incidents`);
-  if (!response.ok) throw new Error(`Unable to load traffic incidents (${response.status})`);
-  return response.json() as Promise<TrafficIncident[]>;
-}
-
 export function loginRequest(email: string, password: string) {
   return request<AuthResponse>('/auth/login', {
     method: 'POST',
@@ -70,10 +66,6 @@ export function resetPasswordRequest(accessToken: string, password: string) {
   });
 }
 
-// ---------- Services ----------
-
-import type { Service } from '../types/service.types';
-
 export function getServices(params?: { type?: string; q?: string; limit?: number }) {
   const search = new URLSearchParams();
   if (params?.type) search.set('type', params.type);
@@ -85,4 +77,8 @@ export function getServices(params?: { type?: string; q?: string; limit?: number
 
 export function getServiceDetails(externalId: string) {
   return request<Service>(`/services/${encodeURIComponent(externalId)}`, { method: 'GET' });
+}
+
+export function getTrafficIncidents() {
+  return request<TrafficIncident[]>('/traffic-incidents', { method: 'GET' });
 }

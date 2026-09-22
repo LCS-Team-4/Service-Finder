@@ -8,7 +8,7 @@ function Login() {
 		localStorage.removeItem('servicefinder_refresh_token');
 	}, []);
 
-	return <AuthLayout label="Log in to your ServiceFinder account"><LoginForm /></AuthLayout>;
+	return <AuthLayout label="Log in to your Cape Guide account"><LoginForm /></AuthLayout>;
 }
 
 export default Login;
