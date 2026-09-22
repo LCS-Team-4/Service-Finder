@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, MapPinned, Minus, Plus, X } from 'lucide-react';
-import Navbar from '../components/common/Navbar';
 import LeafletMap from '../components/Map/LeafletMap';
 import GuideSearch from '../components/SearchBar/GuideSearch';
 import ServicePopup from '../components/ServiceCard/ServicePopup';
@@ -148,7 +147,6 @@ export default function Home() {
 
   return (
     <main className="guide-shell">
-      <Navbar />
 
       <div className="map-stage">
         <LeafletMap
