@@ -28,7 +28,7 @@ service-finder/
 │       ├── types/          # Shared TypeScript types/interfaces
 │       ├── utils/           # Helpers
 │       └── data/            # Mock DB (JSON file) if not using Firestore
-└── docs/                   # Planning docs, roadblock notes, diagrams
+└── docs/                   # Planning docs, roadblock notes, diagrams (see api-integration-guide.md)
 ```
 
 ## Tech Stack

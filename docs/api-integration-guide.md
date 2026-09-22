@@ -25,6 +25,8 @@ these files, update the matching section here.
 6. [Observing the integrations](#6-observing-the-integrations)
 7. [Quota budget](#7-quota-budget)
 8. [Known issues and gotchas](#8-known-issues-and-gotchas)
+9. [Frontend structure and UI wiring](#9-frontend-structure-and-ui-wiring)
+10. [Change history and decisions](#10-change-history-and-decisions)
 
 ---
 
@@ -38,8 +40,8 @@ these files, update the matching section here.
 | 4 | **Supabase PostgREST — reads** | `backend/src/controllers/serviceController.ts:14-22`, `controllers/accidentController.ts:7-10`, `models/Service.ts`, `models/accident.ts` | service-role key (`config/supabase.ts`) | Serve cached rows to the browser |
 | 5 | **Supabase PostgREST — writes** | `backend/src/api/lib/supabase.ts:24,44,56` | service-role key | Upsert, and delete-then-insert |
 | 6 | **Supabase Auth** — signup / login / password reset / `getUser()` | `backend/src/controllers/authController.ts` (via `routes/authRoutes.ts`), `middleware/auth.ts` | `Authorization: Bearer <jwt>` | User accounts (`POST /api/auth/*`) and guarding `PATCH /api/services/:id` |
-| 7 | **OpenStreetMap raster tiles** | browser — `frontend/src/App.tsx:194` via Leaflet | none (public) | Map base layer |
-| 8 | **Google Maps directions** | browser — `frontend/src/App.tsx:409`, `window.open` deep link (no SDK) | none | "Get Directions" button |
+| 7 | **OpenStreetMap raster tiles** | browser — `frontend/src/components/Map/LeafletMap.tsx:46` via Leaflet | none (public) | Map base layer |
+| 8 | **Google Maps directions** | browser — `frontend/src/components/ServiceCard/ServicePopup.tsx:13`, `window.open` deep link (no SDK) | none | "Get Directions" button |
 | 9 | **unpkg CDN + Google Fonts** | `frontend/index.html:7,9,14` | none | Leaflet 1.9.4 CSS/JS + web fonts |
 
 **Key rule:** the browser never calls Geoapify, TomTom or Postgres directly. It only calls our own Express
@@ -66,7 +68,7 @@ API. Provider API keys live exclusively in `backend/.env` and are never bundled 
 | TomTom Search | `POST /api/admin/import/tomtom/services` | **Manual only** — deliberately never scheduled |
 | Supabase reads | Browser page load (two hooks on mount); every `PATCH /api/services/:id` | On demand |
 | Supabase writes | Inside whichever importer is running | Once per import run |
-| Supabase Auth | Every `PATCH /api/services/:id` | On demand |
+| Supabase Auth | Login / signup / password reset from the auth pages; every `PATCH /api/services/:id` | On demand |
 | OSM tiles | Leaflet pans / zooms | Continuous while panning |
 | Google Maps | "Get Directions" click | On click |
 | CDN + fonts | Page load | Once per page load |
@@ -77,8 +79,8 @@ Current values in `backend/.env`:
 GEOAPIFY_MAX_PAGES=3
 TOMTOM_URL=https://api.tomtom.com/traffic/services/5/incidentDetails
 TOMTOM_SERVICE_RADIUS=50000
-AUTO_IMPORT_TRAFFIC=true
-TRAFFIC_IMPORT_INTERVAL_MS=1800000     # 30 minutes
+AUTO_IMPORT_TRAFFIC=true               # DEAD CONFIG - no code reads this any more
+TRAFFIC_IMPORT_INTERVAL_MS=1800000     # 30 minutes; this is what actually arms the traffic schedule
 # IMPORT_INTERVAL_MS and AUTO_IMPORT_SERVICES are unset -> Geoapify import is off
 ```
 
@@ -184,10 +186,11 @@ is intentionally never scheduled.**
 
 | Route | Handler | Query |
 |---|---|---|
-| `GET /api/services` | `controllers/serviceController.ts:5-29` | `select('*, category:service_categories(id,name,slug,parent_id)')`, `limit` clamped to 1–500 (default 100), optional `?type=` (`category.slug`) and `?q=` (`ilike name`) |
+| `GET /api/services` | `controllers/serviceController.ts:5-29` | `select('*, category:service_categories(id,name,slug,parent_id)')`, `limit` clamped to 1–1000 (default 100), optional `?type=` (`category.slug`) and `?q=` (`ilike name`) |
 | `GET /api/services/:externalId` | `models/Service.ts` | single-row lookup |
 | `GET /api/traffic-incidents` | `controllers/accidentController.ts:5-18` | 11 explicit columns from `traffic_incidents`, ordered by `imported_at desc`; returns a **bare array** |
 | `GET /api/traffic-incidents/:externalId` | `controllers/accidentController.ts:21-34` | **bug:** `fetchAccidentDetails()` reads the `services` table, not `traffic_incidents` |
+| `POST /api/auth/login` · `/signup` · `/forgot-password` · `/reset-password` | `routes/authRoutes.ts` → `controllers/authController.ts` | Supabase Auth; see section 3.6 |
 | `PATCH /api/services/:id` | `controllers/serviceController.ts:48+` | find-then-update, admin only |
 
 ### 3.5 Supabase writes — throttled and batched
@@ -477,3 +480,143 @@ Ordered by how likely they are to bite you.
    `components/SearchBar/GuideSearch.tsx`, `components/ServiceCard/ServicePopup.tsx`, `components/Auth/{LoginForm,AuthLayout,AuthMap,BrandCompass}.tsx`
    and `services/guideData.ts` + `services/trafficLegend.ts`. There is no HTTP request logger, so the backend console
    is the only runtime trace.
+
+---
+
+## 9. Frontend structure and UI wiring
+
+The frontend was refactored from a single monolithic `App.tsx` into routing plus focused components. These are
+the live files — everything else under `src/` is either a type, a style, or an unused placeholder (see 8.9).
+
+| File | Role |
+|---|---|
+| `src/main.tsx` | React entry point; mounts `App` into `#root` |
+| `src/App.tsx` | `BrowserRouter` + route table. `/dashboard` is wrapped in `ProtectedDashboard`, which checks the `servicefinder_access_token` in `localStorage` and redirects to `/login` otherwise |
+| `src/pages/Dashboard.tsx` | The map page: search query, category filter, incident filter, legend/about panels, selected-place popup, zoom buttons |
+| `src/components/Map/LeafletMap.tsx` | Owns the Leaflet map instance, the OSM tile layer, and the marker/polyline layer. Parses incident geometry (WKT or hex EWKB) |
+| `src/components/common/CategoryIcon.tsx` · `IncidentIcon.tsx` | Lucide icons per service category and per TomTom incident category |
+| `src/components/SearchBar/GuideSearch.tsx` | Search input + locate button |
+| `src/components/ServiceCard/ServicePopup.tsx` | Detail card for a selected place, including the Google Maps directions link |
+| `src/services/api.ts` | All `fetch()` calls (services, incidents, auth) |
+| `src/services/guideData.ts` | Static category list and 18 seeded Cape Town places, used when the API returns nothing |
+| `src/services/trafficLegend.ts` | Incident category → label + colour, and `buildIncidentLegend()` |
+| `src/hooks/useServices.ts` · `useTrafficIncidents.ts` | Fetch-once-on-mount hooks returning `{ data, loading, error }` |
+| `src/styles/index.css` | All styling, including the legend/marker/traffic-marker rules |
+
+### 9.1 Data flow from API to map
+
+```mermaid
+flowchart LR
+  A["main.tsx"] --> B["App.tsx router + token gate"]
+  B --> C["pages/Dashboard.tsx"]
+  C --> D["useServices"]
+  C --> E["useTrafficIncidents"]
+  D --> F["services/api.ts"]
+  E --> F
+  F -->|"GET /api/services?limit=1000"| G["Express backend :5000"]
+  F -->|"GET /api/traffic-incidents"| G
+  G --> H["Supabase"]
+  D --> I["serviceToPlace - category mapped, coordinates decoded"]
+  E --> J["incidents array"]
+  I --> K["category filter - active + query"]
+  J --> L["incident toggles - hiddenIncidents set"]
+  K --> M["places prop"]
+  L --> N["incidents prop"]
+  M --> O["components/Map/LeafletMap.tsx"]
+  N --> O
+  O --> P["Leaflet markers + incident polylines"]
+  P --> Q["OpenStreetMap tiles"]
+```
+
+Three things worth knowing about this path:
+
+1. **`places` falls back to seeded data.** `Dashboard` maps API services through `serviceToPlace()`; if that yields
+   nothing (API down, empty table, or no service matches a known category) it falls back to the 18 static places in
+   `services/guideData.ts`, so the map is never empty. `serviceCategory()` also restricts what the map can display:
+   any service whose category is not one of the 13 entries in `guideData.categories` is dropped.
+2. **Coordinates may arrive as text or hex.** `parseServiceLocation()` accepts a GeoJSON object, an array, `POINT(lon lat)`
+   WKT, or a hex EWKB string (PostGIS returns geometry as hex through PostgREST), and `LeafletMap` does the same for
+   incident `LINESTRING`s.
+3. **No polling anywhere.** Both hooks fetch once on mount, so a page reload is what refreshes the UI — the 30-minute
+   TomTom refresh only updates the database.
+
+### 9.2 Two independent filters
+
+| Filter | State | Applies to | Where |
+|---|---|---|---|
+| Service category | `active: Category \| null` | `places` (markers) | Legend rows for the 13 service categories; clicking the active one clears it |
+| Road event type | `hiddenIncidents: Set<number \| null>` | `incidents` (polylines + markers) | "Traffic & road works" section of the legend |
+
+They are deliberately independent — filtering out "Road closed" does not touch service markers, and vice versa.
+
+The incident filter works as a hide-list keyed on TomTom's `icon_category` (with `null` as its own key for unknown
+categories). The legend is built from the incidents actually received, so a category only appears as a toggle when the
+feed contains it:
+
+- Heading shows `visible/total`, e.g. `302/302`, so you can see at a glance that filtering is active.
+- Each row shows a coloured swatch with the matching `IncidentIcon`, the label, and the count.
+- A hidden row dims to 45% opacity, greyscales its icon, hides its count, and shows an italic *"hidden"* label.
+- A **"Show all road events"** button appears only while at least one type is hidden.
+- Rows are real buttons with `aria-pressed` and descriptive `title` text.
+
+Because the filter is purely client-side it costs **zero** API quota — it only re-renders the Leaflet layer.
+
+### 9.3 How incidents are drawn
+
+`LeafletMap` draws each incident as a polyline plus a div-icon marker at its first coordinate. Severity styling is
+derived from `magnitude_of_delay` (`>= 4` → red `.traffic`, otherwise orange `.road-works`), while the icon comes from
+`IncidentIcon` keyed on `icon_category` (9 → construction, 1 → car, 7/8 → prohibition sign, etc.). The tooltip shows
+`from_road` and `description`. Road-works rows are drawn dashed in the earlier single-file version; the current
+implementation uses the colour/icon distinction instead.
+
+---
+
+## 10. Change history and decisions
+
+Why the integrations look the way they do — useful when reviewing a diff or re-considering an idea that was already
+tried.
+
+| # | Change | Reason / outcome |
+|---|---|---|
+| 1 | **Traffic import scheduler added** (`server.ts`) | The traffic layer was only ever filled by a manual `POST /api/admin/import/accidents`, so the map went blank whenever nobody triggered it. The scheduler runs one import at boot (so the map is not empty for the first cycle) plus one per `TRAFFIC_IMPORT_INTERVAL_MS`. |
+| 2 | **Interval set to 30 minutes** | 1 call per run ≈ 1,440 requests/month against the 2,500/month free TomTom quota (~58%), leaving headroom for manual refreshes. Traffic is a "present" snapshot, so a longer interval means staler data rather than wrong data. |
+| 3 | **Incident legend filter added** | Requested so road events can be filtered by type (jam / closure / accident / road works). First implemented in the then-monolithic `App.tsx`. |
+| 4 | **Frontend refactor** (`b526a82` "Updated:App.tsx slimed down", `7565370`) | Replaced the 1000-line `App.tsx` with `react-router-dom` routes, `pages/Dashboard.tsx`, `components/Map/LeafletMap.tsx` and focused component folders. Side effect: the incident legend filter (change 3) was dropped — see change 7. |
+| 5 | **Auth flow added** (`e92203d` and related) | Supabase-backed `POST /api/auth/{login,signup,forgot-password,reset-password}` plus Login/Signup/Forgot/Reset pages and a token gate on `/dashboard`. Services limit raised to 1,000 and the frontend env var standardised on `VITE_API_BASE_URL`. |
+| 6 | **Rotating-area import strategy** (`e92203d`) | Geoapify and TomTom began fetching **one rotating 0.75° tile per run** (418 tiles over 9 South African regions). Reverted — see the box in section 3.2: because the traffic writer replaces the whole table, only one tile could ever be present, and the in-memory cursor reset to the empty offshore tile on every restart, leaving `traffic_incidents` empty and the map blank. Cape Town is tile 16 of 418 (~7.5 h of uptime away; 8.7-day full cycle). The tiled config `backend/src/config/southAfricaAreas.ts` was deleted. |
+| 7 | **Legend filter restored in the new structure** | Re-implemented in `pages/Dashboard.tsx` (state + memo + toggle) with the shared category map extracted to `services/trafficLegend.ts`, plus legend styling appended to `styles/index.css`. |
+| 8 | **This document** (`docs/api-integration-guide.md`) | Written alongside the above so the API surface, triggers, quota budget and known issues are documented in one place. README's "API import flow" section points here. |
+
+### 10.1 Why the traffic importer writes with `replaceInSupabase`
+
+Incidents are a live snapshot: the previous run's incidents have usually cleared, and our row shape has no unique key to
+upsert on — the `fields` projection we request (`iconCategory, magnitudeOfDelay, events, from, to, length, delay,
+roadNumbers, timeValidity`) contains no provider id, and `traffic_incidents` has no external-id column, so a batch of
+fresh incidents cannot be matched to the rows they replace. Replacing the table guarantees no stale geometry is left on
+the map. The trade-off is the window described in 3.2 — a failure between the delete and the inserts empties the table,
+and the next successful tick is what restores it. If this needs hardening, either request the TomTom incident id and
+upsert on it (plus prune by `imported_at`), or write into a staging state and swap atomically.
+
+### 10.2 If national traffic coverage is wanted later
+
+Do not reintroduce tiling on top of `replaceInSupabase`. In order of effort:
+
+1. **Widen the single request.** `TOMTOM_BBOX` is one box; TomTom caps Incident Details at 10,000 km² per request, so
+   a little more than the current Cape Town box is available in a single call with no extra quota.
+2. **Accumulate instead of replace.** Insert each tile's rows and prune by age, so coverage builds up across the
+   rotation. Note the refresh cadence this implies: at 1 tile per 30 minutes, a 418-tile rotation means each tile is
+   only revisited every 8.7 days, and prune age must be at least that long — which is far too stale for live traffic.
+3. **Make the rotation useful by shrinking it.** Rotate over ~9 metro areas (not 418 tiles) each run, one area per
+   30 minutes, which revisits each city every ~4.5 hours and keeps the data meaningful.
+4. **Raise the budget deliberately.** More tiles per run means more quota; check the plan before scheduling it.
+
+### 10.3 Things to keep in mind while developing
+
+- **Every backend restart costs one TomTom request** while `TRAFFIC_IMPORT_INTERVAL_MS > 0`, and nodemon restarts on
+  every `.ts` save. That, not the 30-minute timer, is what dominates usage during a dev session.
+- **Editing `.env` does not restart the server** (nodemon watches `.ts`/`.js`/`.json`), so restart the backend after
+  changing an interval.
+- **A page reload is the only way the UI picks up new incidents** until a refresh interval is added to
+  `useTrafficIncidents` — that would cost zero provider quota, since it only reads our own API.
+- **Verify a scheduler change with two timestamps**, not one: note `imported_at` from
+  `GET /api/traffic-incidents`, wait past the interval, and confirm it advanced (see section 6).
