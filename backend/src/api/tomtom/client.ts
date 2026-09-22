@@ -3,12 +3,12 @@ import { replaceInSupabase, upsertToSupabase } from '../lib/supabase'
 import { supabase } from '../../config/supabase'
 import { ensureServiceCategories } from '../../services/categoryService'
 import type { TrafficIncidentFeature, TrafficIncidentsResponse } from '../../types/accident.type'
-import { formatBbox, getNextSouthAfricaArea, getNextSouthAfricaTrafficArea } from '../../config/southAfricaAreas'
 
 setRateLimit('tomtom', 10, 60_000)
 
 const tomtomUrl = requireEnv('TOMTOM_URL', process.env.TOMTOM_URL)
 const tomtomSearchUrl = process.env.TOMTOM_SEARCH_URL ?? 'https://api.tomtom.com/search/2'
+const tomtomBbox = process.env.TOMTOM_BBOX ?? '18.35,-34.35,19.00,-33.75'
 const incidentFields = '{incidents{type,geometry{type,coordinates},properties{iconCategory,magnitudeOfDelay,events{description,code,iconCategory},from,to,length,delay,roadNumbers,timeValidity}}}'
 
 export function tomtom(key: string, format: 'json' | 'xml' = 'json') {
@@ -31,9 +31,8 @@ export async function importTrafficIncidents(
   trafficImportInProgress = true
 
   try {
-    const area = getNextSouthAfricaTrafficArea()
     const apiResponse = await tomtom(key).get<TrafficIncidentsResponse>(path, {
-      bbox: formatBbox(area),
+      bbox: tomtomBbox,
       fields: incidentFields,
       language: 'en-GB',
       timeValidityFilter: 'present',
@@ -63,7 +62,7 @@ export async function importTrafficIncidents(
 
     await replaceInSupabase('traffic_incidents', rows, { batchSize: 100 })
 
-    return { imported: rows.length, area: area.name, skipped: false }
+    return { imported: rows.length, skipped: false }
   } finally {
     trafficImportInProgress = false
   }
@@ -125,6 +124,11 @@ const serviceSearchCategories = (process.env.TOMTOM_SERVICE_CATEGORIES ?? 'schoo
   .split(',')
   .map((category) => category.trim())
   .filter(Boolean)
+
+const serviceSearchCenters = (process.env.TOMTOM_SERVICE_CENTERS ?? '-33.9249,18.4241;-29.8587,31.0218;-26.2041,28.0473;-25.7479,28.2293;-33.918,18.4233;-33.9608,18.4617;-29.0852,26.1596;-23.9045,29.4689;-28.7282,24.7499')
+  .split(';')
+  .map((center) => center.split(',').map(Number))
+  .filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon))
 
 async function searchTomTomServices(key: string, category: string, latitude: number, longitude: number) {
   const pageSize = 100
@@ -225,13 +229,13 @@ export async function importTomTomServices(
   serviceImportInProgress = true
 
   try {
-    const area = getNextSouthAfricaArea('tomtom-services')
     const categories = await ensureServiceCategories()
     const results: Array<{ result: TomTomServiceResult; category: string }> = []
     for (const category of serviceSearchCategories) {
-      const [latitude, longitude] = area.center
-      const categoryResults = await searchTomTomServices(key, category, latitude, longitude)
-      results.push(...categoryResults.map((result) => ({ result, category })))
+      for (const [latitude, longitude] of serviceSearchCenters) {
+        const categoryResults = await searchTomTomServices(key, category, latitude, longitude)
+        results.push(...categoryResults.map((result) => ({ result, category })))
+      }
     }
 
     const unique = Array.from(new Map(results.map((entry) => [entry.result.id, entry])).values())
@@ -268,7 +272,7 @@ export async function importTomTomServices(
     if (inserts.length > 0) {
       await upsertToSupabase('services', inserts, { batchSize: 100, onConflict: 'external_id' })
     }
-    return { fetched: unique.length, inserted: inserts.length, enriched, area: area.name, skipped: false }
+    return { fetched: unique.length, inserted: inserts.length, enriched, skipped: false }
   } finally {
     serviceImportInProgress = false
   }

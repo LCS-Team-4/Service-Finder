@@ -35,11 +35,11 @@ if (importIntervalMs > 0) {
 // Traffic incidents are a "present" snapshot, so they are refreshed on an interval.
 // The importer's own lock returns { skipped: true } if a run is still in flight.
 const trafficImportIntervalMs = Number(process.env.TRAFFIC_IMPORT_INTERVAL_MS || 0);
-if (process.env.AUTO_IMPORT_TRAFFIC === 'true') {
-	importTrafficIncidents().catch((error) => console.error('[import] initial traffic import failed', error));
-}
-
 if (trafficImportIntervalMs > 0) {
+	// The interval alone would wait a full cycle before the first import, leaving the
+	// map empty until then — so kick off an initial import immediately. The importer's
+	// own lock makes a concurrent run a no-op ({ skipped: true }).
+	importTrafficIncidents().catch((error) => console.error('[import] initial traffic import failed', error));
 	setInterval(() => {
 		importTrafficIncidents().catch((error) => console.error('[import] traffic import failed', error));
 	}, trafficImportIntervalMs);
