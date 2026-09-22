@@ -11,7 +11,7 @@ these files, update the matching section here.
 | Scope | Backend integrations (Geoapify, TomTom, Supabase) + browser-side APIs (OSM tiles, Google Maps link, CDN assets) |
 | Backend base URL | `http://localhost:5000` (`PORT` in `backend/.env`) |
 | Frontend base URL | `http://localhost:5173` (Vite dev server) |
-| Frontend API base | `frontend/src/services/api.ts:6` — `VITE_API_URL`, falling back to `http://localhost:5000/api` |
+| Frontend API base | `frontend/src/services/api.ts:4-5` — `VITE_API_BASE_URL` (or `http://localhost:5000/api`), normalised so it always ends in `/api` |
 
 ---
 
@@ -37,7 +37,7 @@ these files, update the matching section here.
 | 3 | **TomTom Search (`categorySearch`)** — `/search/2` | `backend/src/api/tomtom/client.ts:141-156` | `key` query param | POI search to insert / enrich services |
 | 4 | **Supabase PostgREST — reads** | `backend/src/controllers/serviceController.ts:14-22`, `controllers/accidentController.ts:7-10`, `models/Service.ts`, `models/accident.ts` | service-role key (`config/supabase.ts`) | Serve cached rows to the browser |
 | 5 | **Supabase PostgREST — writes** | `backend/src/api/lib/supabase.ts:24,44,56` | service-role key | Upsert, and delete-then-insert |
-| 6 | **Supabase Auth** — `auth.getUser()` | `backend/src/middleware/auth.ts` | `Authorization: Bearer <jwt>` | Guard `PATCH /api/services/:id` |
+| 6 | **Supabase Auth** — signup / login / password reset / `getUser()` | `backend/src/controllers/authController.ts` (via `routes/authRoutes.ts`), `middleware/auth.ts` | `Authorization: Bearer <jwt>` | User accounts (`POST /api/auth/*`) and guarding `PATCH /api/services/:id` |
 | 7 | **OpenStreetMap raster tiles** | browser — `frontend/src/App.tsx:194` via Leaflet | none (public) | Map base layer |
 | 8 | **Google Maps directions** | browser — `frontend/src/App.tsx:409`, `window.open` deep link (no SDK) | none | "Get Directions" button |
 | 9 | **unpkg CDN + Google Fonts** | `frontend/index.html:7,9,14` | none | Leaflet 1.9.4 CSS/JS + web fonts |
@@ -45,13 +45,15 @@ these files, update the matching section here.
 **Key rule:** the browser never calls Geoapify, TomTom or Postgres directly. It only calls our own Express
 API. Provider API keys live exclusively in `backend/.env` and are never bundled into the frontend.
 
-`frontend/src/services/api.ts` contains the only three `fetch()` calls in the frontend:
+`frontend/src/services/api.ts` contains every `fetch()` call in the frontend:
 
 | Function | Request | Used by |
 |---|---|---|
-| `getServices()` | `GET {API_URL}/services?limit=500` | `hooks/useServices.ts` → `App.tsx` |
+| `getServices()` | `GET {API_URL}/services?limit=1000` | `hooks/useServices.ts` → `pages/Dashboard.tsx` |
 | `getServiceDetails(externalId)` | `GET {API_URL}/services/{externalId}` | **nothing — currently unused** |
-| `getTrafficIncidents()` | `GET {API_URL}/traffic-incidents` | `hooks/useTrafficIncidents.ts` → `App.tsx` |
+| `getTrafficIncidents()` | `GET {API_URL}/traffic-incidents` | `hooks/useTrafficIncidents.ts` → `pages/Dashboard.tsx` |
+| `loginRequest`, `signupRequest`, `forgotPasswordRequest`, `resetPasswordRequest` | `POST {API_URL}/auth/login`, `/auth/signup`, `/auth/forgot-password`, `/auth/reset-password` | `pages/Login.tsx`, `Signup.tsx`, `ForgotPassword.tsx`, `ResetPassword.tsx` |
+| `request<T>()` (private helper) | wraps each auth `fetch`, surfaces the backend's `{ error }` message, and returns a friendly "start the backend" message when offline | the four auth calls above |
 
 ---
 
@@ -149,6 +151,17 @@ own lock makes a concurrent run a no-op, so an overlapping tick cannot double-sp
 > Caveat: because the write is delete-then-insert, a failed run **after** the delete leaves the table empty. The
 > interval self-heals on the next successful tick; if the monthly quota is exhausted it stays empty until reset.
 
+> **Why this is one fixed bbox and not a set of tiles.** An earlier revision fetched a single rotating 0.75° tile per
+> run (418 tiles covering South Africa, written through the same `replaceInSupabase`). Because each run wipes the whole
+> table first, the map could only ever hold one tile — and since the cursor was in-memory, every server restart reset
+> it to the offshore "Western Cape tile 1", which has zero incidents, leaving `traffic_incidents` empty. Cape Town
+> itself is tile 16 of 418, i.e. ~7.5 h of uptime away, with a full cycle taking 8.7 days. If national coverage is
+> wanted later, the write strategy must change first: insert each tile's rows and prune by age instead of replacing.
+> The tiled configuration was removed, so coverage is deliberately Cape Town only (`TOMTOM_BBOX`).
+
+> **`AUTO_IMPORT_TRAFFIC` is dead config.** It still sits in `backend/.env`, but no code reads it — the boot import is
+> triggered purely by `TRAFFIC_IMPORT_INTERVAL_MS > 0`. Remove it from your env file to avoid confusion.
+
 ### 3.3 TomTom Search (`categorySearch`) — service enrichment
 
 `importTomTomServices()` in `backend/src/api/tomtom/client.ts:227-281`:
@@ -193,17 +206,25 @@ Importing 10,000 services therefore becomes 100 PostgREST calls spread over ~20 
 
 ### 3.6 Supabase Auth
 
-`PATCH /api/services/:id` is guarded by `authenticateToken` then `requireAdmin` (`middleware/auth.ts`): the
-`Authorization: Bearer <jwt>` token is validated with `supabase.auth.getUser()`, and the user's
-`app_metadata.role` must equal `admin`. No frontend code calls this route yet.
+Two distinct schemes are in use:
 
-Admin **imports** use a different, simpler scheme: `middleware/adminImportAuth.ts` compares the
-`x-admin-import-token` header against `ADMIN_IMPORT_TOKEN` and returns `401` on a mismatch.
+1. **User accounts** — `POST /api/auth/login`, `/auth/signup`, `/auth/forgot-password`, `/auth/reset-password`
+   (`routes/authRoutes.ts` → `controllers/authController.ts`). These are the only endpoints the browser posts
+   credentials to; the controller talks to Supabase Auth. The frontend calls them through `services/api.ts`
+   (`loginRequest`, `signupRequest`, `forgotPasswordRequest`, `resetPasswordRequest`) and stores the returned
+   `servicefinder_access_token` in `localStorage`, which `App.tsx` checks before rendering `/dashboard`.
+2. **Admin writes** — `PATCH /api/services/:id` is guarded by `authenticateToken` then `requireAdmin`
+   (`middleware/auth.ts`): the `Authorization: Bearer <jwt>` token is validated with `supabase.auth.getUser()`, and
+   the user's `app_metadata.role` must equal `admin`. No frontend code calls this route yet.
+
+Admin **imports** use a third, simpler scheme: `middleware/adminImportAuth.ts` compares the `x-admin-import-token`
+header against `ADMIN_IMPORT_TOKEN` and returns `401` on a mismatch.
 
 ### 3.7 Browser-side APIs
 
-- **OpenStreetMap tiles** — `App.tsx:194`, `https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png`, restyled with a CSS
-  sepia filter. Leaflet itself is loaded from **unpkg in `index.html:14`** as the global `L` (not an npm dependency).
+- **OpenStreetMap tiles** — `frontend/src/components/Map/LeafletMap.tsx:46`,
+  `https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png`, restyled with a CSS sepia filter. Leaflet itself is loaded
+  from **unpkg in `index.html`** as the global `L` (not an npm dependency).
 - **Google Maps** — the "Get Directions" button opens
   `https://www.google.com/maps/dir/?api=1&destination=lat,lng` in a new tab. No SDK, no key.
 - **Google Fonts** — `index.html:9`.
@@ -232,7 +253,7 @@ and route every call through `request()` with that limiter name. See the README'
 flowchart TB
   subgraph B["Browser :5173"]
     IDX["index.html - Leaflet + fonts from CDN"]
-    APP["App.tsx - mounts once, no polling"]
+    APP["Dashboard.tsx - mounts once, no polling"]
     H1["useServices"]
     H2["useTrafficIncidents"]
     FILT["hiddenIncidents Set - legend toggles"]
@@ -411,12 +432,12 @@ is deliberately manual-only.
 Ordered by how likely they are to bite you.
 
 1. **`frontend/.env` holds a copy of the backend secrets.** It contains `SUPABASE_SERVICE_KEY`,
-   `ADMIN_IMPORT_TOKEN`, `GEOAPIFY_API_KEY` and `TOMTOM_API_KEY` — but no `VITE_API_URL`. Because none of those are
-   `VITE_`-prefixed, Vite will not inline them into the bundle (the browser never sees them), and the file is
-   git-ignored, so this is not an active leak. It does mean the frontend is silently running on the hardcoded
-   fallback `http://localhost:5000/api` from `frontend/src/services/api.ts:6`, which will break any deployed build.
-   Recommended: keep `frontend/.env` to just `VITE_API_URL=http://localhost:5000/api`, and leave provider keys in
-   `backend/.env` only. `frontend/.env.example` currently documents `VITE_API_BASE_URL`, which the code does not read.
+   `ADMIN_IMPORT_TOKEN`, `GEOAPIFY_API_KEY` and `TOMTOM_API_KEY`. Because none are `VITE_`-prefixed, Vite never inlines
+   them into the bundle (the browser does not see them) and the file is git-ignored, so this is not an active leak —
+   but it is duplicated credential material and it means `VITE_API_BASE_URL` is unset, so the frontend silently runs on
+   the hardcoded default `http://localhost:5000/api`. That works locally and breaks any deployed build. Recommended:
+   keep `frontend/.env` to just `VITE_API_BASE_URL=http://localhost:5000/api` (as `frontend/.env.example` already
+   documents) and leave provider keys in `backend/.env` only.
 2. **The browser never re-fetches.** Both hooks run once on mount with empty dependency arrays, so a tab left open
    shows a stale snapshot even though the backend refreshes every 30 minutes. Adding a poll (e.g. every 5 minutes) to
    `useTrafficIncidents` costs **zero provider quota** — it only hits our own API.
@@ -441,13 +462,18 @@ Ordered by how likely they are to bite you.
    place all Maps API calls go through. That file exists, but it is only a stub: an in-memory cache skeleton plus a
    `geocode()` whose real API call is still a `TODO`, with **no callers anywhere** in the backend. It also points
    readers at `docs/roadblock-notes.md`, which does not exist. The rate-limit defence the README describes is actually
-   implemented by `api/lib/http.ts` + `api/lib/rate_limit.ts` + `api/lib/supabase.ts` (see section 3.8). In the same
-   way, the README's `frontend/src/components/Map` fallback component is an empty placeholder — the map, its markers
-   and its error/loading states live inline in `frontend/src/App.tsx`.
-9. **Placeholder files that are 0 bytes** (Phase 2 work still to come): all of `frontend/src/pages/*`,
-   `frontend/src/components/*` (`Map`, `AdminPanel`, `Auth`, `common`, `Dashboard`, `SearchBar`, `ServiceCard`),
-   `frontend/src/context/AuthContext.tsx`, `frontend/src/hooks/useAuth.ts`, `frontend/src/services/authService.ts`,
-   `frontend/src/services/mapsService.ts`, `frontend/src/utils/*`, `frontend/src/styles/variables.css`, plus
-   `backend/src/services/authService.ts`, `backend/src/utils/apiResponse.ts` and
-   `backend/src/middleware/requestLogger.ts`. `backend/src/routes/authRoutes.ts` has no handlers mounted either, so
-   `/api/auth` currently answers with the not-found handler.
+   implemented by `api/lib/http.ts` + `api/lib/rate_limit.ts` + `api/lib/supabase.ts` (see section 3.8). Likewise the
+   README's `frontend/src/components/Map` fallback is not a fallback layer at all: the map is now
+   `components/Map/LeafletMap.tsx`, its page shell is `pages/Dashboard.tsx`, and the loading/error handling lives in
+   those components plus the `useServices` / `useTrafficIncidents` hooks.
+9. **Placeholder files that are still 0 bytes** (unbuilt work): `frontend/src/components/AdminPanel/AdminPanel.tsx`,
+   `components/Auth/SignupForm.tsx`, `components/common/{Button,Loader}.tsx`, `components/Dashboard/Dashboard.tsx`,
+   `components/Map/{MapMarker,MapView}.tsx`, `components/SearchBar/SearchBar.tsx`,
+   `components/ServiceCard/ServiceCard.tsx`, `context/AuthContext.tsx`, `hooks/useAuth.ts`, `pages/Admin.tsx`,
+   `pages/Home.tsx`, `services/authService.ts`, `services/mapsService.ts`, `utils/{constants,formatters}.ts`,
+   plus `backend/src/services/authService.ts`, `backend/src/utils/apiResponse.ts` and
+   `backend/src/middleware/requestLogger.ts`. Note these are mostly *superseded* paths: the live implementations are
+   `pages/Dashboard.tsx`, `components/Map/LeafletMap.tsx`, `components/common/{CategoryIcon,IncidentIcon}.tsx`,
+   `components/SearchBar/GuideSearch.tsx`, `components/ServiceCard/ServicePopup.tsx`, `components/Auth/{LoginForm,AuthLayout,AuthMap,BrandCompass}.tsx`
+   and `services/guideData.ts` + `services/trafficLegend.ts`. There is no HTTP request logger, so the backend console
+   is the only runtime trace.

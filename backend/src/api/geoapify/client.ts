@@ -1,12 +1,21 @@
 import { request, setRateLimit, requireEnv } from '../lib/http'
 import { upsertToSupabase } from '../lib/supabase'
 import { ensureServiceCategories, resolveCategorySlug } from '../../services/categoryService'
-import { formatBbox, getNextSouthAfricaArea } from '../../config/southAfricaAreas'
 
 setRateLimit('geoapify', 10, 60_000)
 
 
 const geoapifyUrl = requireEnv('GEOAPIFY_URL', process.env.GEOAPIFY_URL)
+const southAfricaRegions = [
+  [16.45, -34.85, 20.58, -28.48],
+  [20.58, -34.85, 24.7, -28.48],
+  [24.7, -34.85, 28.82, -28.48],
+  [28.82, -34.85, 32.95, -28.48],
+  [16.45, -28.48, 20.58, -22.1],
+  [20.58, -28.48, 24.7, -22.1],
+  [24.7, -28.48, 28.82, -22.1],
+  [28.82, -28.48, 32.95, -22.1],
+] as const
 export function geopaify(key: string, format: 'json' | 'xml' = 'json' ) {
   return {
     get: (path: string, extraParams: Record<string, string | number> = {}) =>
@@ -45,20 +54,22 @@ export async function importServices(
         'service.police',
       ].join(',')
       const features: any[] = []
-      const area = getNextSouthAfricaArea('geoapify-services')
 
-      const pageSize = 300
-      const maxPages = Math.max(1, Number(process.env.GEOAPIFY_MAX_PAGES ?? 3))
-      for (let page = 0; page < maxPages; page++) {
-        const data = await geopaify(key).get(path, {
-          categories,
-          filter: `rect:${formatBbox(area)}`,
-          limit: pageSize,
-          offset: page * pageSize,
-        })
-        const pageFeatures = data.features ?? []
-        features.push(...pageFeatures)
-        if (pageFeatures.length < pageSize) break
+      //targets regions of south africa for api calls to send to supabase
+      for (const [west, south, east, north] of southAfricaRegions) {
+        const pageSize = 300
+        const maxPages = Math.max(1, Number(process.env.GEOAPIFY_MAX_PAGES ?? 3))
+        for (let page = 0; page < maxPages; page++) {
+          const data = await geopaify(key).get(path, {
+            categories,
+            filter: `rect:${west},${south},${east},${north}`,
+            limit: pageSize,
+            offset: page * pageSize,
+          })
+          const pageFeatures = data.features ?? []
+          features.push(...pageFeatures)
+          if (pageFeatures.length < pageSize) break
+        }
       }
 
       const services = features.flatMap((feature: any) => {
@@ -93,7 +104,7 @@ export async function importServices(
       onConflict: 'external_id',
     })
 
-    return { imported: services.length, area: area.name, skipped: false }
+    return { imported: services.length, skipped: false }
   } finally {
     importInProgress = false
   }

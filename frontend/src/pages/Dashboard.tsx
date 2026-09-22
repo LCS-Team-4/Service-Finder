@@ -4,9 +4,11 @@ import LeafletMap from '../components/Map/LeafletMap';
 import GuideSearch from '../components/SearchBar/GuideSearch';
 import ServicePopup from '../components/ServiceCard/ServicePopup';
 import { CategoryIcon } from '../components/common/CategoryIcon';
+import { IncidentIcon } from '../components/common/IncidentIcon';
 import { useTrafficIncidents } from '../hooks/useTrafficIncidents';
 import { useServices } from '../hooks/useServices';
 import { categories, places } from '../services/guideData';
+import { buildIncidentLegend } from '../services/trafficLegend';
 import { Category, Place } from '../types/guide.types';
 import type { Service } from '../types/service.types';
 
@@ -81,6 +83,7 @@ export default function Dashboard() {
 	const [aboutOpen, setAboutOpen] = useState(false);
 	const [legendOpen, setLegendOpen] = useState(false);
 	const [saved, setSaved] = useState<string[]>([]);
+	const [hiddenIncidents, setHiddenIncidents] = useState<Set<number | null>>(() => new Set());
 	const { incidents } = useTrafficIncidents();
 	const { services, error: servicesError } = useServices();
 	const mapRef = useRef<any>(null);
@@ -89,13 +92,23 @@ export default function Dashboard() {
 		return apiPlaces.length > 0 ? apiPlaces : places;
 	}, [services]);
 	const visible = useMemo(() => allPlaces.filter((place) => (!active || place.category === active) && `${place.name} ${place.area} ${place.category}`.toLowerCase().includes(query.toLowerCase())), [active, allPlaces, query]);
+	const incidentLegend = useMemo(() => buildIncidentLegend(incidents), [incidents]);
+	const visibleIncidents = useMemo(() => incidents.filter((incident) => !hiddenIncidents.has(incident.icon_category ?? null)), [hiddenIncidents, incidents]);
+	const toggleIncident = useCallback((code: number | null) => {
+		setHiddenIncidents((current) => {
+			const next = new Set(current);
+			if (next.has(code)) next.delete(code);
+			else next.add(code);
+			return next;
+		});
+	}, []);
 	const selectPlace = useCallback((place: Place) => { setSelected(place); mapRef.current?.flyTo([place.lat, place.lng], 15, { animate: true, duration: 0.7 }); }, []);
 	const search = () => { const first = visible[0]; if (first) selectPlace(first); setNotice(first ? `${visible.length} place${visible.length === 1 ? '' : 's'} found` : 'No places found'); };
 	const locate = () => navigator.geolocation?.getCurrentPosition((position) => { mapRef.current?.flyTo([position.coords.latitude, position.coords.longitude], 14); setNotice('Showing your current location.'); }, () => setNotice('We could not access your location.'));
 	useEffect(() => { if (servicesError) setNotice('Showing sample services while the full service list is unavailable.'); }, [servicesError]);
 
 	return <main className="guide-shell">
-		<LeafletMap places={visible} incidents={incidents} onSelect={selectPlace} mapRef={mapRef} />
+		<LeafletMap places={visible} incidents={visibleIncidents} onSelect={selectPlace} mapRef={mapRef} />
 		<header className="masthead"><h1>The Cape Guide</h1><p>Find. Navigate. Connect.</p></header>
 		<GuideSearch query={query} onQueryChange={setQuery} onSearch={search} onLocate={locate} />
 		{notice && <div className="notice">{notice}</div>}
@@ -103,7 +116,18 @@ export default function Dashboard() {
 		<button className="panel-trigger about-trigger" onClick={() => setAboutOpen(true)}><BookOpen size={17} />About the Guide</button>
 		<button className="panel-trigger legend-trigger" onClick={() => setLegendOpen(true)}><MapPinned size={17} />Legend</button>
 		{aboutOpen && <aside className="about popup-panel"><button className="close-panel" aria-label="Close about" onClick={() => setAboutOpen(false)}><X size={17} /></button><h2>About the Cape<br />Guide</h2><p>The Cape Guide is a map-based service finder designed to help people discover useful public services across Cape Town. Search, explore and navigate to the services you need — all from one map.</p><div className="motto">Every road leads somewhere.<br />Every service helps someone.</div></aside>}
-		{legendOpen && <aside className="legend popup-panel"><button className="close-panel" aria-label="Close legend" onClick={() => setLegendOpen(false)}><X size={17} /></button><h2>Legend</h2>{categories.map((item) => <button key={item.name} className={active === item.name ? 'active' : ''} onClick={() => { setActive(active === item.name ? null : item.name); setSelected(null); }}><i style={{ background: item.color }}><CategoryIcon category={item.name} /></i>{item.name}</button>)}<button className="you-are" onClick={locate}><i><MapPinned size={16} /></i>You Are Here</button></aside>}
+		{legendOpen && <aside className="legend popup-panel">
+			<button className="close-panel" aria-label="Close legend" onClick={() => setLegendOpen(false)}><X size={17} /></button>
+			<h2>Legend</h2>
+			{categories.map((item) => <button key={item.name} className={active === item.name ? 'active' : ''} onClick={() => { setActive(active === item.name ? null : item.name); setSelected(null); }}><i style={{ background: item.color }}><CategoryIcon category={item.name} /></i>{item.name}</button>)}
+			<h3 className="legend-heading">Traffic &amp; road works<span className="legend-count">{visibleIncidents.length}/{incidents.length}</span></h3>
+			{incidents.length > 0 && <p className="legend-hint">Tap a road event to hide or show it on the map.</p>}
+			{incidentLegend.length === 0
+				? <p className="legend-hint">No incidents reported right now.</p>
+				: incidentLegend.map((item) => <button key={item.label} className={hiddenIncidents.has(item.code) ? 'legend-toggle off' : 'legend-toggle'} aria-pressed={!hiddenIncidents.has(item.code)} title={`${hiddenIncidents.has(item.code) ? 'Show' : 'Hide'} ${item.label.toLowerCase()}`} onClick={() => toggleIncident(item.code)}><i style={{ background: item.color }}><IncidentIcon category={item.code} /></i>{item.label}<span className="legend-count">{item.count}</span></button>)}
+			{hiddenIncidents.size > 0 && <button className="legend-show-all" onClick={() => setHiddenIncidents(new Set())}>Show all road events</button>}
+			<button className="you-are" onClick={locate}><i><MapPinned size={16} /></i>You Are Here</button>
+		</aside>}
 		<div className="leaflet-zoom"><button aria-label="Zoom in" onClick={() => mapRef.current?.zoomIn()}><Plus size={18} /></button><button aria-label="Zoom out" onClick={() => mapRef.current?.zoomOut()}><Minus size={18} /></button></div>
 	</main>;
 }
