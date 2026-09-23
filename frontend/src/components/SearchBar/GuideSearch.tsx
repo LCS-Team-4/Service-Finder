@@ -6,6 +6,8 @@ interface GuideSearchProps {
   onSearch: () => void;
   onLocate: () => void;
   tracking: boolean;
+  radiusKm: number | null;
+  onRadiusChange: (radius: number | null) => void;
 }
 
 export default function GuideSearch({
@@ -14,6 +16,8 @@ export default function GuideSearch({
   onSearch,
   onLocate,
   tracking,
+  radiusKm,
+  onRadiusChange,
 }: GuideSearchProps) {
   return (
     <section className="search-panel">
@@ -36,6 +40,22 @@ export default function GuideSearch({
       >
         <LocateFixed size={17} />
       </button>
+
+      <select
+  className="radius-select"
+  value={radiusKm ?? 'off'}
+  onChange={(event) =>
+    onRadiusChange(event.target.value === 'off' ? null : Number(event.target.value))
+  }
+  title="Filter services by distance from you"
+>
+  <option value={1}>1 km</option>
+  <option value={2}>2 km</option>
+  <option value={5}>5 km</option>
+  <option value={10}>10 km</option>
+  <option value={20}>20 km</option>
+  <option value="off">All</option>
+</select>
     </section>
   );
 }

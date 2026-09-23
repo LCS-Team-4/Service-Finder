@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, MapPinned, Minus, Plus, X } from 'lucide-react';
+import { parseIncidentGeometry } from '../components/Map/LeafletMap';
 import LeafletMap from '../components/Map/LeafletMap';
 import GuideSearch from '../components/SearchBar/GuideSearch';
 import ServicePopup from '../components/ServiceCard/ServicePopup';
@@ -49,6 +50,22 @@ const toPlace = (service: Service): Place | null => {
   };
 };
 
+const distanceKm = (
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): number => {
+  const R = 6371; // earth radius in km
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+};
+
 export default function Home() {
   const { services, loading, error } = useServices();
   const { incidents } = useTrafficIncidents();
@@ -61,8 +78,9 @@ export default function Home() {
   const [legendOpen, setLegendOpen] = useState(false);
   const [saved, setSaved] = useState<string[]>([]);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
-    const [tracking, setTracking] = useState(false);
-    const [routeTarget, setRouteTarget] = useState<Place | null>(null);
+  const [tracking, setTracking] = useState(false);
+  const [routeTarget, setRouteTarget] = useState<Place | null>(null);
+  const [radiusKm, setRadiusKm] = useState<number | null>(5);  // null = unlimited
 
   const mapRef = useRef<any>(null);
   const watchId = useRef<number | null>(null);
@@ -79,13 +97,30 @@ export default function Home() {
     [places],
   );
 
-  const visible = useMemo(
-    () => places.filter((p) =>
+  const visible = useMemo(() => {
+    const searched = places.filter((p) =>
       (!active || p.category === active) &&
       `${p.name} ${p.formatted_address ?? ''} ${p.category}`.toLowerCase().includes(query.toLowerCase()),
-    ),
-    [active, places, query],
-  );
+    );
+
+    if (!userLocation || radiusKm === null) return searched;
+
+    return searched.filter(
+      (place) => distanceKm({ lat: place.lat, lng: place.lng }, userLocation) <= radiusKm,
+    );
+  }, [active, places, query, userLocation, radiusKm]);
+
+  const visibleIncidents = useMemo(() => {
+    if (!userLocation || radiusKm === null) return incidents;
+
+    return incidents.filter((incident) => {
+      const coords = parseIncidentGeometry(incident.geometry);
+      if (coords.length === 0) return false;
+      return coords.some(
+        ([lng, lat]) => distanceKm({ lat, lng }, userLocation) <= radiusKm,
+      );
+    });
+  }, [incidents, userLocation, radiusKm]);
 
   const selectPlace = useCallback((place: Place) => {
     setSelected(place);
@@ -164,12 +199,14 @@ export default function Home() {
           <p>Find. Navigate. Connect.</p>
         </header>
 
-        <GuideSearch
+       <GuideSearch
           query={query}
           onQueryChange={setQuery}
           onSearch={search}
           onLocate={locate}
           tracking={tracking}
+          radiusKm={radiusKm}
+          onRadiusChange={setRadiusKm}
         />
 
         {loading && <div className="notice">Loading services...</div>}

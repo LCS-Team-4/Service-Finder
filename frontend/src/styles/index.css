@@ -1796,3 +1796,19 @@ input {
 .clear-route:hover {
   background: #f8d991;
 }
+
+.radius-select {
+	padding: 8px 10px;
+	border: 1px solid #9e784e;
+	background: #f8e5b8;
+	color: #5b442c;
+	font-family: 'Cormorant SC', serif;
+	font-size: 12px;
+	letter-spacing: 1px;
+	cursor: pointer;
+	outline: none;
+}
+
+.radius-select:focus {
+	border-color: #65431f;
+}
