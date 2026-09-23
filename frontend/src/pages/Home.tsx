@@ -139,12 +139,11 @@ export default function Home() {
   };
 
   // Clean up the watcher on unmount.
-  useEffect(
-    () => () => {
-      if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
-    },
-    [],
-  );
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(''), 4000);   // 4 seconds
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   return (
     <main className="guide-shell">
@@ -179,19 +178,32 @@ export default function Home() {
 
         {selected && (
           <ServicePopup
-                place={selected}
-                saved={saved.includes(selected.name)}
-                onClose={() => {
-                    setSelected(null);
-                    setRouteTarget(null);
-                }}
-                onSave={() => toggleSave(selected.name)}
-                onViewDetails={() => setNotice(`More details for ${selected.name} coming soon.`)}
-                onGetDirections={() => {
-                    setRouteTarget(selected);
-                    setNotice(`Getting road directions to ${selected.name}...`);
-                }}
-                />
+            place={selected}
+            saved={saved.includes(selected.name)}
+            onClose={() => {
+              setSelected(null);
+              setRouteTarget(null);
+            }}
+            onSave={() => toggleSave(selected.name)}
+            onViewDetails={() => setNotice(`More details for ${selected.name} coming soon.`)}
+            onGetDirections={() => {
+              setRouteTarget(selected);
+              setSelected(null);
+              setNotice(`Getting road directions to ${selected.name}...`);
+            }}
+          />
+        )}
+
+                {routeTarget && (
+          <button
+            className="clear-route"
+            onClick={() => {
+              setRouteTarget(null);
+              setNotice('');
+            }}
+          >
+            Clear route
+          </button>
         )}
 
         <button className="panel-trigger about-trigger" onClick={() => setAboutOpen(true)}>
