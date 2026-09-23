@@ -1,25 +1,5 @@
 {
   "dependencies": {
     "jsonwebtoken": "^9.0.3"
-  },
-  "name": "service-finder",
-  "version": "1.0.0",
-  "description": "Web app to help users locate nearby public services (clinics, libraries, shelters, etc.) on an interactive map. Phase 2 adds login and user-submitted service suggestions.",
-  "main": "index.js",
-  "devDependencies": {},
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/LCS-Team-4/Service-Finder.git"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "bugs": {
-    "url": "https://github.com/LCS-Team-4/Service-Finder/issues"
-  },
-  "homepage": "https://github.com/LCS-Team-4/Service-Finder#readme"
+  }
 }

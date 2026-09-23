@@ -5,16 +5,18 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "nodemon --exec ts-node src/server.ts",
+    "dev:demo": "nodemon --exec ts-node src/server.demo.ts",
     "build": "tsc",
     "start": "node dist/server.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.112.4",
+    "@supabase/supabase-js": "^2.116.0",
     "axios": "^1.7.0",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.19.0",
-    "firebase-admin": "^12.3.0"
+    "firebase-admin": "^12.3.0",
+    "rxdb": "^17.5.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.0",
