@@ -1,15 +1,22 @@
-import { Bus, Flame, GraduationCap, Heart, Hospital, House, Landmark, Library, Pill, Shield, ShoppingBag, Smile, Stethoscope } from 'lucide-react';
-import { Category } from '../../types/guide.types';
+import { Bus, Flame, GraduationCap, Heart, Hospital, House, Landmark, Library, Pill, Shield, ShoppingBag, Smile, Stethoscope, MapPinned } from 'lucide-react';
+import type { Category } from '../../types/service.types';
 
 export function CategoryIcon({ category, size = 14 }: { category: Category; size?: number }) {
   const props = { size, strokeWidth: 2.2 };
   switch (category) {
-    case 'Clinics': return <Stethoscope {...props} />; case 'Libraries': return <Library {...props} />;
-    case 'Shelters': return <House {...props} />; case 'Hospitals': return <Hospital {...props} />;
-    case 'Police Stations': return <Shield {...props} />; case 'Pharmacies': return <Pill {...props} />;
-    case 'Dentists': return <Smile {...props} />; case 'SPCA': return <Heart {...props} />;
-    case 'Fire Stations': return <Flame {...props} />; case 'Home Affairs': return <Landmark {...props} />;
-    case 'Malls': return <ShoppingBag {...props} />; case 'Transport': return <Bus {...props} />;
-    case 'Schools / Universities': return <GraduationCap {...props} />;
+    case 'Clinic':         return <Stethoscope    {...props} />;
+    case 'Library':        return <Library        {...props} />;
+    case 'Shelter':        return <House          {...props} />;
+    case 'Hospital':       return <Hospital       {...props} />;
+    case 'Police station': return <Shield         {...props} />;
+    case 'Pharmacy':       return <Pill           {...props} />;
+    case 'Dentist':        return <Smile          {...props} />;
+    case 'Fire station':   return <Flame          {...props} />;
+    case 'Home Affairs':   return <Landmark       {...props} />;
+    case 'School':         return <GraduationCap  {...props} />;
+    case 'SPCA':           return <Heart          {...props} />;
+    case 'Mall':           return <ShoppingBag    {...props} />;
+    case 'Transport':      return <Bus            {...props} />;
+    default:               return <MapPinned      {...props} />;
   }
 }

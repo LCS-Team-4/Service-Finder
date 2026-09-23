@@ -29,15 +29,11 @@ export function errorHandler(
 			message?: unknown
 			code?: unknown
 			details?: unknown
-			hint?: unknown
 		}
 		const message = typeof upstreamError.message === 'string'
 			? upstreamError.message
 			: 'Internal server error'
 		const response: { error: string; code?: string; details?: string } = { error: message }
-
-		const hint = typeof upstreamError.hint === 'string' ? upstreamError.hint : undefined
-		if (hint) response.details = hint
 
 		if (typeof upstreamError.code === 'string' && upstreamError.code) {
 			response.code = upstreamError.code

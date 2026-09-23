@@ -25,3 +25,14 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+
+# others
+.fallow/
+.repomix/
+
+frontend/package-lock.json
+backend/package-lock.json
+
+# Tooling output
+repomix-output.txt
+repomix-output-v*.txt
