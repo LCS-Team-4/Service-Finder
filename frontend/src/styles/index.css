@@ -1774,11 +1774,10 @@ input {
 }
 
 .clear-route {
-  position: absolute;
-  top: 79px;
-  /* was 24px — now aligned with search panel top */
-  left: 24px;
-  z-index: 1100;
+	position: absolute;
+	top: 24px;
+	left: 50px;
+	z-index: 1100;
   padding: 10px 18px;
   border: 1px solid #8c6337;
   outline: 2px double #f6d994;
