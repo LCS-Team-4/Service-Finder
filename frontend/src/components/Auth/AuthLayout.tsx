@@ -15,8 +15,8 @@ function AuthLayout({ children, label }: Readonly<AuthLayoutProps>) {
 			<section className="auth-story" aria-label="The Cape Guide introduction">
 				<div className="story-content">
 					<a className="brand" href="/" aria-label="The Cape Guide home">
-						<span className="brand-mark" aria-hidden="true"><BrandCompass /></span>
-						<span className="brand-name">The Cape Guide</span>
+						<span className="brand-mark" aria-hidden="true"><span>⌕</span></span>
+						<span className="brand-name">THE CAPE <span>GUIDE</span></span>
 					</a>
 
 					<div className="story-copy">

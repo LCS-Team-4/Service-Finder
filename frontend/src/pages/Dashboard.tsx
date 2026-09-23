@@ -36,46 +36,121 @@ function parseServiceLocation(location: Service['location']): [number, number] |
         const lat = view.getFloat64(offset + 8, littleEndian);
         return Number.isFinite(lat) && Number.isFinite(lng) ? [lat, lng] : null;
       }
-    } catch {
-      return null;
+      if (accuracyCircle.current) {
+        map.removeLayer(accuracyCircle.current);
+        accuracyCircle.current = null;
+      }
+      return;
     }
-  }
-  try {
-    return parseServiceLocation(JSON.parse(location) as Service['location']);
-  } catch {
-    return null;
-  }
+    const { lat, lng, accuracy } = userLocation;
+    if (!userMarker.current) {
+      const icon = L.divIcon({
+        className: 'user-location-wrap',
+        html: '<span class="user-location-pulse"></span><span class="user-location-dot"></span>',
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+      });
+      userMarker.current = L.marker([lat, lng], { icon, zIndexOffset: 1000 }).addTo(map);
+      accuracyCircle.current = L.circle([lat, lng], {
+        radius: accuracy,
+        color: '#22c55e',
+        weight: 1,
+        fillColor: '#22c55e',
+        fillOpacity: 0.12,
+      }).addTo(map);
+    } else {
+      userMarker.current.setLatLng([lat, lng]);
+      accuracyCircle.current.setLatLng([lat, lng]);
+      accuracyCircle.current.setRadius(accuracy);
+    }
+  }, [userLocation, mapRef]);
+
+  // Fetch real road directions (OSRM) and draw the route along actual roads
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !L) return;
+
+    if (!userLocation || !routeTarget) {
+      if (routeLine.current) {
+        map.removeLayer(routeLine.current);
+        routeLine.current = null;
+      }
+      lastRouteKey.current = '';
+      return;
+    }
+
+    // Only re-fetch when destination changes or user has moved ~80m+
+    const key = `${routeTarget.lat.toFixed(4)},${routeTarget.lng.toFixed(4)}|${userLocation.lat.toFixed(3)},${userLocation.lng.toFixed(3)}`;
+    if (key === lastRouteKey.current && routeLine.current) return;
+    lastRouteKey.current = key;
+
+    const controller = new AbortController();
+    const from = `${userLocation.lng},${userLocation.lat}`;
+    const to = `${routeTarget.lng},${routeTarget.lat}`;
+    // Public OSRM demo — driving profile with full road geometry
+    const url = `https://router.project-osrm.org/route/v1/driving/${from};${to}?overview=full&geometries=geojson`;
+
+    fetch(url, { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error('Routing request failed');
+        return res.json();
+      })
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        const coords =
+          data?.routes?.[0]?.geometry?.coordinates?.map(
+            (c: [number, number]) => [c[1], c[0]] as [number, number],
+          ) ?? null;
+
+        // Fallback to straight line only if routing fails
+        const latlngs: [number, number][] =
+          coords && coords.length > 1
+            ? coords
+            : [
+                [userLocation.lat, userLocation.lng],
+                [routeTarget.lat, routeTarget.lng],
+              ];
+
+        if (!routeLine.current) {
+          routeLine.current = L.polyline(latlngs, {
+            color: '#1f9450',
+            weight: 5,
+            opacity: 0.9,
+          }).addTo(map);
+        } else {
+          routeLine.current.setLatLngs(latlngs);
+        }
+
+        // Zoom in tight on the user's live location — Google Maps "locate me" style —
+        // rather than zooming out to fit the whole route.
+        map.flyTo([userLocation.lat, userLocation.lng], 18, { animate: true, duration: 0.8 });
+      })
+      .catch((err) => {
+        if (err?.name === 'AbortError') return;
+        const latlngs: [number, number][] = [
+          [userLocation.lat, userLocation.lng],
+          [routeTarget.lat, routeTarget.lng],
+        ];
+        if (!routeLine.current) {
+          routeLine.current = L.polyline(latlngs, {
+            color: '#1f9450',
+            weight: 5,
+            opacity: 0.9,
+            dashArray: '8 10',
+          }).addTo(map);
+        } else {
+          routeLine.current.setLatLngs(latlngs);
+        }
+        map.flyTo([userLocation.lat, userLocation.lng], 18, { animate: true, duration: 0.8 });
+      });
+
+    return () => controller.abort();
+  }, [userLocation, routeTarget, mapRef]);
+
+  return <div className="leaflet-map" ref={root} />;
 }
 
-function serviceCategory(service: Service): Category | null {
-  const source = `${service.category?.name ?? ''} ${service.category?.slug ?? ''} ${service.type ?? ''}`.toLowerCase();
-  const aliases: Partial<Record<Category, string[]>> = {
-    'Hospitals': ['hospital'],
-    'Police Stations': ['police'],
-    'Fire Stations': ['fire station', 'firestation'],
-    'Schools / Universities': ['school', 'university', 'college'],
-    'Home Affairs': ['home affairs', 'government'],
-  };
-  return categories.find((item) => {
-    const name = item.name.toLowerCase();
-    return source.includes(name) || source.includes(name.endsWith('s') ? name.slice(0, -1) : name) || aliases[item.name]?.some((alias) => source.includes(alias));
-  })?.name ?? null;
-}
-
-function serviceToPlace(service: Service): Place | null {
-  const coordinates = parseServiceLocation(service.location);
-  const category = serviceCategory(service);
-  if (!coordinates || !category) return null;
-  return {
-    name: service.name,
-    category,
-    area: service.formatted_address?.split(',')[0] ?? category,
-    lat: coordinates[0],
-    lng: coordinates[1],
-  };
-}
-
-export default function Dashboard() {
+function Dashboard() {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState<Category | null>(null);
   const [selected, setSelected] = useState<Place | null>(null);
@@ -102,10 +177,102 @@ export default function Dashboard() {
       return next;
     });
   }, []);
-  const selectPlace = useCallback((place: Place) => { setSelected(place); mapRef.current?.flyTo([place.lat, place.lng], 15, { animate: true, duration: 0.7 }); }, []);
-  const search = () => { const first = visible[0]; if (first) selectPlace(first); setNotice(first ? `${visible.length} place${visible.length === 1 ? '' : 's'} found` : 'No places found'); };
-  const locate = () => navigator.geolocation?.getCurrentPosition((position) => { mapRef.current?.flyTo([position.coords.latitude, position.coords.longitude], 14); setNotice('Showing your current location.'); }, () => setNotice('We could not access your location.'));
-  useEffect(() => { if (servicesError) setNotice('Showing sample services while the full service list is unavailable.'); }, [servicesError]);
+
+  // Map markers: respect legend category filter + search query
+  const visible = useMemo(
+    () => places.filter((p) => (!active || p.category === active) && matchesQuery(p, query)),
+    [active, query, matchesQuery],
+  );
+
+  // Dropdown: ALL matching places from full dataset, sorted closest -> farthest
+  const sortedResults = useMemo(() => {
+    const list = places.filter((p) => matchesQuery(p, query));
+    if (userLocation) {
+      list.sort((a, b) => distanceKm(userLocation, a) - distanceKm(userLocation, b));
+    } else {
+      list.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return list;
+  }, [query, userLocation, matchesQuery]);
+
+  const selectPlace = useCallback((place: Place) => {
+    setSelected(place);
+    mapRef.current?.flyTo([place.lat, place.lng], 15, { animate: true, duration: 0.7 });
+  }, []);
+
+  const search = () => {
+    const first = sortedResults[0];
+    if (first) selectPlace(first);
+    setNotice(
+      first
+        ? `${sortedResults.length} place${sortedResults.length === 1 ? '' : 's'} found`
+        : 'No places found',
+    );
+  };
+
+  const locate = () => {
+    if (!navigator.geolocation) {
+      setNotice('Geolocation is not supported on this device.');
+      return;
+    }
+    if (tracking) {
+      if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
+      watchId.current = null;
+      hasCentered.current = false;
+      setTracking(false);
+      setUserLocation(null);
+      setRouteTarget(null);
+      setNotice('Live location turned off.');
+      return;
+    }
+    setTracking(true);
+    setNotice('Getting your live location...');
+    watchId.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        setUserLocation({ lat: latitude, lng: longitude, accuracy });
+        if (!hasCentered.current) {
+          mapRef.current?.flyTo([latitude, longitude], 15, { animate: true, duration: 0.7 });
+          hasCentered.current = true;
+        }
+        setNotice('Showing your live location.');
+      },
+      () => {
+        setNotice('We could not access your location.');
+        setTracking(false);
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
+    );
+  };
+
+  useEffect(
+    () => () => {
+      if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
+    },
+    [],
+  );
+
+  // In-map directions: set route target, start live location if needed, and zoom
+  // in tight on the user's live location right away (Google Maps "locate me" style).
+  const getDirections = (place: Place) => {
+    setRouteTarget(place);
+    if (!tracking) locate();
+    if (userLocation) {
+      mapRef.current?.flyTo([userLocation.lat, userLocation.lng], 18, { animate: true, duration: 0.8 });
+    }
+    setNotice(`Getting road directions to ${place.name}...`);
+  };
+
+  const details = selected
+    ? {
+        address:
+          selected.category === 'SPCA'
+            ? '1 Bird Street, Grassy Park'
+            : `${selected.area} service centre, Cape Town`,
+        hours: selected.category === 'Hospitals' ? 'Open 24 hours' : '08:00 – 16:30',
+        phone: selected.category === 'SPCA' ? '021 700 4158' : '021 400 0000',
+      }
+    : null;
 
   return <main className="guide-shell">
     <LeafletMap places={visible} incidents={visibleIncidents} onSelect={selectPlace} mapRef={mapRef} />
