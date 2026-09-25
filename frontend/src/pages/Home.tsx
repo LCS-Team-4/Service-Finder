@@ -242,10 +242,22 @@ export default function Home() {
           </button>
         )}
 
-        <button className="panel-trigger about-trigger" onClick={() => setAboutOpen(true)}>
+          <button
+            className="panel-trigger about-trigger"
+            onClick={() => {
+              setAboutOpen((open) => !open);
+              setLegendOpen(false);
+            }}
+          >
           <BookOpen size={17} /> About the Guide
         </button>
-        <button className="panel-trigger legend-trigger" onClick={() => setLegendOpen(true)}>
+          <button
+            className="panel-trigger legend-trigger"
+            onClick={() => {
+              setLegendOpen((open) => !open);
+              setAboutOpen(false);
+            }}
+          >
           <MapPinned size={17} /> Legend
         </button>
 
