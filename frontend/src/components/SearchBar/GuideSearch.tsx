@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { LocateFixed, Search } from 'lucide-react';
 
 interface GuideSearchProps {
@@ -10,6 +11,15 @@ interface GuideSearchProps {
   onRadiusChange: (radius: number | null) => void;
 }
 
+const RADIUS_OPTIONS: { label: string; value: number | null }[] = [
+  { label: '1 km', value: 1 },
+  { label: '2 km', value: 2 },
+  { label: '5 km', value: 5 },
+  { label: '10 km', value: 10 },
+  { label: '20 km', value: 20 },
+  { label: 'All', value: null },
+];
+
 export default function GuideSearch({
   query,
   onQueryChange,
@@ -19,8 +29,20 @@ export default function GuideSearch({
   radiusKm,
   onRadiusChange,
 }: GuideSearchProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+
   return (
-    <section className="search-panel">
+        <section className="search-panel">
       <span className="glass">
         <Search size={19} />
       </span>
@@ -41,21 +63,34 @@ export default function GuideSearch({
         <LocateFixed size={17} />
       </button>
 
-      <select
-  className="radius-select"
-  value={radiusKm ?? 'off'}
-  onChange={(event) =>
-    onRadiusChange(event.target.value === 'off' ? null : Number(event.target.value))
-  }
-  title="Filter services by distance from you"
->
-  <option value={1}>1 km</option>
-  <option value={2}>2 km</option>
-  <option value={5}>5 km</option>
-  <option value={10}>10 km</option>
-  <option value={20}>20 km</option>
-  <option value="off">All</option>
-</select>
+      <div className="radius-select" ref={ref}>
+        <button
+          type="button"
+          className="radius-select-trigger"
+          onClick={() => setOpen((o) => !o)}
+        >
+          {radiusKm === null ? 'All' : `${radiusKm} km`}
+          <span className="radius-select-caret">▾</span>
+        </button>
+        {open && (
+          <ul className="radius-select-menu" role="listbox">
+            {RADIUS_OPTIONS.map((opt) => (
+              <li
+                key={opt.label}
+                role="option"
+                aria-selected={radiusKm === opt.value}
+                className={radiusKm === opt.value ? 'selected' : ''}
+                onClick={() => {
+                  onRadiusChange(opt.value);
+                  setOpen(false);
+                }}
+              >
+                {opt.label}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </section>
   );
 }

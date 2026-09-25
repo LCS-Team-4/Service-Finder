@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, MapPinned, Minus, Plus, X } from 'lucide-react';
-import { parseIncidentGeometry } from '../components/Map/LeafletMap';
-import LeafletMap from '../components/Map/LeafletMap';
+import LeafletMap, { parseIncidentGeometry } from '../components/Map/LeafletMap';
 import GuideSearch from '../components/SearchBar/GuideSearch';
 import ServicePopup from '../components/ServiceCard/ServicePopup';
 import { CategoryIcon } from '../components/common/CategoryIcon';
@@ -190,8 +189,8 @@ export default function Home() {
           onSelect={selectPlace}
           mapRef={mapRef}
           userLocation={userLocation}
-        incidents={incidents}
-        routeTarget={routeTarget}
+          incidents={visibleIncidents}
+          routeTarget={routeTarget}
         />
 
         <header className="masthead">
