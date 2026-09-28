@@ -4,8 +4,8 @@ import { ensureServiceCategories, resolveCategorySlug } from '../../services/cat
 
 setRateLimit('geoapify', 10, 60_000)
 
-
 const geoapifyUrl = requireEnv('GEOAPIFY_URL', process.env.GEOAPIFY_URL)
+
 const southAfricaRegions = [
   [16.45, -34.85, 20.58, -28.48],
   [20.58, -34.85, 24.7, -28.48],
@@ -16,7 +16,8 @@ const southAfricaRegions = [
   [24.7, -28.48, 28.82, -22.1],
   [28.82, -28.48, 32.95, -22.1],
 ] as const
-export function geopaify(key: string, format: 'json' | 'xml' = 'json' ) {
+
+export function geoapifyClient(key: string, format: 'json' | 'xml' = 'json') {
   return {
     get: (path: string, extraParams: Record<string, string | number> = {}) =>
       request(geoapifyUrl, path, {
@@ -26,10 +27,8 @@ export function geopaify(key: string, format: 'json' | 'xml' = 'json' ) {
   }
 }
 
-
 let importInProgress = false
 
-//sends API data to supabase 
 export async function importServices(
   key = requireEnv('GEOAPIFY_API_KEY', process.env.GEOAPIFY_API_KEY),
   path = ''
@@ -40,39 +39,41 @@ export async function importServices(
   //makes the categories more readible
   try {
     const categoryMap = await ensureServiceCategories()
+
     const categories = [
-        'office.government.migration',
-        'office.government.public_service',
-        'service.fire_station',
-        'service.social_facility.shelter',
-        'healthcare.hospital',
-        'healthcare.clinic_or_praxis',
-        'healthcare.pharmacy',
-        'healthcare.dentist',
-        'education.library',
-        'education.school',
-        'service.police',
-      ].join(',')
-      const features: any[] = []
+      'office.government.migration',
+      'office.government.public_service',
+      'service.fire_station',
+      'service.social_facility.shelter',
+      'healthcare.hospital',
+      'healthcare.clinic_or_praxis',
+      'healthcare.pharmacy',
+      'healthcare.dentist',
+      'education.library',
+      'education.school',
+      'service.police',
+    ].join(',')
 
-      //targets regions of south africa for api calls to send to supabase
-      for (const [west, south, east, north] of southAfricaRegions) {
-        const pageSize = 300
-        const maxPages = Math.max(1, Number(process.env.GEOAPIFY_MAX_PAGES ?? 3))
-        for (let page = 0; page < maxPages; page++) {
-          const data = await geopaify(key).get(path, {
-            categories,
-            filter: `rect:${west},${south},${east},${north}`,
-            limit: pageSize,
-            offset: page * pageSize,
-          })
-          const pageFeatures = data.features ?? []
-          features.push(...pageFeatures)
-          if (pageFeatures.length < pageSize) break
-        }
+    const features: any[] = []
+
+    // Targets regions of South Africa for API calls to send to Supabase
+    for (const [west, south, east, north] of southAfricaRegions) {
+      const pageSize = 300
+      const maxPages = Math.max(1, Number(process.env.GEOAPIFY_MAX_PAGES ?? 3))
+      for (let page = 0; page < maxPages; page++) {
+        const data = await geoapifyClient(key).get(path, {
+          categories,
+          filter: `rect:${west},${south},${east},${north}`,
+          limit: pageSize,
+          offset: page * pageSize,
+        })
+        const pageFeatures = data.features ?? []
+        features.push(...pageFeatures)
+        if (pageFeatures.length < pageSize) break
       }
+    }
 
-      const services = features.flatMap((feature: any) => {
+    const services = features.flatMap((feature: any) => {
       const props = feature.properties
       const address = typeof props.formatted === 'string' ? props.formatted.trim() : ''
       const name = typeof props.name === 'string' ? props.name.trim() : ''
@@ -95,7 +96,7 @@ export async function importServices(
         website: props.website ?? null,
         wheelchair: props.datasource?.raw?.wheelchair ?? null,
         sourcename: props.datasource?.sourcename ?? 'osm',
-        imported_at: new Date().toISOString()
+        imported_at: new Date().toISOString(),
       }]
     })
 

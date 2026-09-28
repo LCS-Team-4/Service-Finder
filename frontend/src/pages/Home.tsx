@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, MapPinned, Minus, Plus, X } from 'lucide-react';
+import { BookOpen, MapPinned, Minus, Plus, X, LocateFixed } from 'lucide-react';
 import LeafletMap, { parseIncidentGeometry } from '../components/Map/LeafletMap';
 import GuideSearch from '../components/SearchBar/GuideSearch';
 import ServicePopup from '../components/ServiceCard/ServicePopup';
@@ -7,6 +7,7 @@ import { CategoryIcon } from '../components/common/CategoryIcon';
 import { useServices } from '../hooks/useServices';
 import { useTrafficIncidents } from '../hooks/useTrafficIncidents';
 import { categoryColor } from '../utils/constants';
+import { distanceKm, isMobileViewport } from '../utils/geo';
 import type { Category, Place, Service } from '../types/service.types';
 
 interface CategoryItem {
@@ -14,16 +15,13 @@ interface CategoryItem {
   color: string;
 }
 
-/** Decode a Service.location into [longitude, latitude] or null. */
 const getCoordinates = (location: Service['location']): [number, number] | null => {
   if (location && typeof location === 'object' && location.coordinates) return location.coordinates;
   if (typeof location !== 'string') return null;
 
-  // WKT: "POINT(lng lat)" or "SRID=4326;POINT(lng lat)"
   const match = location.match(/(?:SRID=\d+;)?\s*POINT\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)/i);
   if (match) return [Number(match[1]), Number(match[2])];
 
-  // WKB hex (PostGIS binary)
   if (!/^[0-9a-f]+$/i.test(location) || location.length < 34) return null;
   const bytes = new Uint8Array(location.match(/.{2}/g)!.map((pair) => parseInt(pair, 16)));
   const littleEndian = bytes[0] === 1;
@@ -37,7 +35,6 @@ const getCoordinates = (location: Service['location']): [number, number] | null 
   ];
 };
 
-/** Convert a raw Service row into a renderable Place, or null if unusable. */
 const toPlace = (service: Service): Place | null => {
   const coordinates = getCoordinates(service.location);
   if (!coordinates || coordinates.some((coordinate) => !Number.isFinite(coordinate))) return null;
@@ -47,22 +44,6 @@ const toPlace = (service: Service): Place | null => {
     lat: coordinates[1],
     lng: coordinates[0],
   };
-};
-
-const distanceKm = (
-  a: { lat: number; lng: number },
-  b: { lat: number; lng: number },
-): number => {
-  const R = 6371; // earth radius in km
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const lat1 = toRad(a.lat);
-  const lat2 = toRad(b.lat);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
 };
 
 export default function Home() {
@@ -79,21 +60,28 @@ export default function Home() {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
   const [tracking, setTracking] = useState(false);
   const [routeTarget, setRouteTarget] = useState<Place | null>(null);
-  const [radiusKm, setRadiusKm] = useState<number | null>(5);  // null = unlimited
+  const [radiusKm, setRadiusKm] = useState<number | null>(5);
+
+  const isMobile = useMemo(() => isMobileViewport(), []);
 
   const mapRef = useRef<any>(null);
   const watchId = useRef<number | null>(null);
   const hasCentered = useRef(false);
 
-  const places = useMemo(
+  const allPlaces = useMemo(
     () => services.map(toPlace).filter((place): place is Place => place !== null),
     [services],
   );
 
+  const places = useMemo(() => {
+    if (isMobile && !userLocation) return [];
+    return allPlaces;
+  }, [allPlaces, isMobile, userLocation]);
+
   const categories = useMemo<CategoryItem[]>(
-    () => Array.from(new Set(places.map((place) => place.category)))
+    () => Array.from(new Set(allPlaces.map((place) => place.category)))
       .map((name) => ({ name, color: categoryColor(name) })),
-    [places],
+    [allPlaces],
   );
 
   const visible = useMemo(() => {
@@ -152,17 +140,40 @@ export default function Home() {
       (pos) => {
         const { latitude, longitude, accuracy } = pos.coords;
         setUserLocation({ lat: latitude, lng: longitude, accuracy });
-        if (!hasCentered.current) {
+        if (!hasCentered.current && accuracy < 500) {
           mapRef.current?.flyTo([latitude, longitude], 15, { animate: true, duration: 0.7 });
           hasCentered.current = true;
         }
-        setNotice('Showing your live location.');
+        setNotice(
+          accuracy < 100
+            ? 'Showing your live location.'
+            : `Live location ±${Math.round(accuracy)} m — still refining…`,
+        );
       },
-      () => {
-        setNotice('We could not access your location.');
+      (err) => {
+        if (hasCentered.current) {
+          if (err.code === err.PERMISSION_DENIED) {
+            setNotice('Location permission was revoked.');
+            setTracking(false);
+          }
+          return;
+        }
+        switch (err.code) {
+          case err.PERMISSION_DENIED:
+            setNotice('Location permission denied. Enable it in browser settings.');
+            break;
+          case err.POSITION_UNAVAILABLE:
+            setNotice('Location unavailable. Check your device settings.');
+            break;
+          case err.TIMEOUT:
+            setNotice('Location request timed out. Try again.');
+            break;
+          default:
+            setNotice('We could not access your location.');
+        }
         setTracking(false);
       },
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 },
     );
   };
 
@@ -172,16 +183,23 @@ export default function Home() {
     );
   };
 
-  // Clean up the watcher on unmount.
   useEffect(() => {
     if (!notice) return;
-    const timer = setTimeout(() => setNotice(''), 4000);   // 4 seconds
+    const timer = setTimeout(() => setNotice(''), 4000);
     return () => clearTimeout(timer);
   }, [notice]);
 
+  useEffect(
+    () => () => {
+      if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
+    },
+    [],
+  );
+
+  const showMobilePrompt = isMobile && !userLocation && !loading;
+
   return (
     <main className="guide-shell">
-
       <div className="map-stage">
         <LeafletMap
           places={visible}
@@ -198,7 +216,7 @@ export default function Home() {
           <p>Find. Navigate. Connect.</p>
         </header>
 
-       <GuideSearch
+        <GuideSearch
           query={query}
           onQueryChange={setQuery}
           onSearch={search}
@@ -211,6 +229,15 @@ export default function Home() {
         {loading && <div className="notice">Loading services...</div>}
         {error && <div className="notice">{error}</div>}
         {notice && !loading && <div className="notice">{notice}</div>}
+
+        {showMobilePrompt && (
+          <div className="mobile-locate-prompt">
+            <button className="mobile-locate-button" onClick={locate}>
+              <LocateFixed size={18} />
+              Find services near me
+            </button>
+          </div>
+        )}
 
         {selected && (
           <ServicePopup
@@ -230,7 +257,7 @@ export default function Home() {
           />
         )}
 
-                {routeTarget && (
+        {routeTarget && (
           <button
             className="clear-route"
             onClick={() => {
@@ -242,22 +269,22 @@ export default function Home() {
           </button>
         )}
 
-          <button
-            className="panel-trigger about-trigger"
-            onClick={() => {
-              setAboutOpen((open) => !open);
-              setLegendOpen(false);
-            }}
-          >
+        <button
+          className="panel-trigger about-trigger"
+          onClick={() => {
+            setAboutOpen((open) => !open);
+            setLegendOpen(false);
+          }}
+        >
           <BookOpen size={17} /> About the Guide
         </button>
-          <button
-            className="panel-trigger legend-trigger"
-            onClick={() => {
-              setLegendOpen((open) => !open);
-              setAboutOpen(false);
-            }}
-          >
+        <button
+          className="panel-trigger legend-trigger"
+          onClick={() => {
+            setLegendOpen((open) => !open);
+            setAboutOpen(false);
+          }}
+        >
           <MapPinned size={17} /> Legend
         </button>
 

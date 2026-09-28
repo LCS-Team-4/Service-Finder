@@ -6,6 +6,8 @@ import path from 'path';
 import serviceRoutes from './routes/serviceRoutes';
 import authRoutes from './routes/authRoutes';
 import adminRoutes from './routes/adminRoutes';
+import accidentRoutes from './routes/accidentRoutes';
+
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 
 const app = express();
@@ -16,6 +18,7 @@ app.use(express.json());
 app.use('/api/services', serviceRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/traffic-incidents', accidentRoutes);
 
 // Serve the built frontend for demo purposes
 const frontendDist = path.join(__dirname, '../../frontend/dist');

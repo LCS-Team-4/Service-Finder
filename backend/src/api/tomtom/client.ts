@@ -6,7 +6,6 @@ import type { TrafficIncidentFeature, TrafficIncidentsResponse } from '../../typ
 
 setRateLimit('tomtom', 10, 60_000)
 
-
 const tomtomUrl = requireEnv('TOMTOM_URL', process.env.TOMTOM_URL)
 const tomtomSearchUrl = process.env.TOMTOM_SEARCH_URL ?? 'https://api.tomtom.com/search/2'
 const tomtomBbox = process.env.TOMTOM_BBOX ?? '18.35,-34.35,19.00,-33.75'
@@ -16,8 +15,8 @@ export function tomtom(key: string, format: 'json' | 'xml' = 'json') {
   return {
     get: <T = unknown>(path: string, extraParams: Record<string, string | number> = {}) =>
       request<T>(tomtomUrl, path, {
-        params: { key, format, ...extraParams }, // double-check this — TomTom's docs use `key`, not `apiKey` like Geoapify does
-        limiter: 'tomtom', 
+        params: { key, format, ...extraParams },
+        limiter: 'tomtom',
       }),
   }
 }
@@ -61,7 +60,7 @@ export async function importTrafficIncidents(
       }
     })
 
-      await replaceInSupabase('traffic_incidents', rows, { batchSize: 100 })
+    await replaceInSupabase('traffic_incidents', rows, { batchSize: 100 })
 
     return { imported: rows.length, skipped: false }
   } finally {
@@ -73,7 +72,6 @@ function isTrafficIncidentsResponse(value: unknown): value is TrafficIncidentsRe
   if (!value || typeof value !== 'object' || !Array.isArray((value as { incidents?: unknown }).incidents)) {
     return false
   }
-
   return (value as TrafficIncidentsResponse).incidents.every(isTrafficIncidentFeature)
 }
 

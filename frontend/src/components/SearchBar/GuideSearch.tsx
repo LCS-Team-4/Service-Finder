@@ -11,12 +11,13 @@ interface GuideSearchProps {
   onRadiusChange: (radius: number | null) => void;
 }
 
-const RADIUS_OPTIONS: { label: string; value: number | null }[] = [
+const RADIUS_OPTIONS: Array<{ label: string; value: number | null }> = [
   { label: '1 km', value: 1 },
   { label: '2 km', value: 2 },
   { label: '5 km', value: 5 },
   { label: '10 km', value: 10 },
-  { label: '20 km', value: 20 },
+  { label: '25 km', value: 25 },
+  { label: '50 km', value: 50 },
   { label: 'All', value: null },
 ];
 
@@ -42,7 +43,7 @@ export default function GuideSearch({
   }, [open]);
 
   return (
-        <section className="search-panel">
+    <section className="search-panel">
       <span className="glass">
         <Search size={19} />
       </span>

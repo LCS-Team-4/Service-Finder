@@ -145,18 +145,9 @@ export async function resetPassword(req: Request, res: Response) {
 			message?: string
 			error_description?: string
 		}
-		const upstreamMessage = updateError.msg || updateError.message || updateError.error_description
-		// Supabase answers with internal JWT wording (for example "This endpoint requires a
-		// valid Bearer token") whenever the reset token is expired, already used or revoked.
-		// Keep it in the server log, but show the user something they can act on.
-		console.warn(`[auth] password update rejected (${updateResponse.status}): ${upstreamMessage ?? 'no message'}`)
-		if (updateResponse.status === 401 || updateResponse.status === 403) {
-			return res.status(401).json({
-				error: 'This reset link is missing or has expired. Request a new link from the forgot password page.',
-			})
-		}
-		return res.status(400).json({
-			error: upstreamMessage || 'Unable to update your password.',
+		const message = updateError.msg || updateError.message || updateError.error_description
+		return res.status(updateResponse.status === 401 ? 401 : 400).json({
+			error: message || 'Unable to update your password.',
 		})
 	}
 
