@@ -40,6 +40,8 @@ export async function fetchServiceDetails(externalId: string): Promise<ServiceDe
     return data as ServiceDetails | null
 }
 
+
+//fetches to relative radius of an individual
 export async function fetchServicesInRadius(
     latitude: number,
     longitude: number,
@@ -58,6 +60,7 @@ export async function fetchServicesInRadius(
     return (data ?? []) as ServiceDetails[]
 }
 
+//aallows admins to update service details 
 export async function updateServiceDetails(
     id: string,
     updates: {
@@ -81,6 +84,21 @@ export async function updateServiceDetails(
 
     return { data, error }
 }
+
+export async function updateServiceStatus(
+  id: string,
+  status: string
+) {
+  const { data, error } = await supabase
+    .from('services')
+    .update({ status })
+    .eq('id', id)
+    .select()
+    .single()
+
+  return { data, error }
+}
+
 
 export async function findServiceById(id: string) {
   const { data, error } = await supabase
