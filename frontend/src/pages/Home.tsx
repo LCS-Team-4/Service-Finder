@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, MapPinned, Minus, Plus, X } from 'lucide-react';
+import { BookOpen, MapPinned, Minus, Plus, X, LocateFixed } from 'lucide-react';
 import LeafletMap from '../components/Map/LeafletMap';
 import GuideSearch from '../components/SearchBar/GuideSearch';
 import ServicePopup from '../components/ServiceCard/ServicePopup';
@@ -7,23 +7,24 @@ import { CategoryIcon } from '../components/common/CategoryIcon';
 import { useServices } from '../hooks/useServices';
 import { useTrafficIncidents } from '../hooks/useTrafficIncidents';
 import { categoryColor } from '../utils/constants';
+import { distanceKm, isMobileViewport } from '../utils/geo';
 import type { Category, Place, Service } from '../types/service.types';
+
+const NEARBY_RADIUS_KM_DESKTOP = 10;
+const NEARBY_RADIUS_KM_MOBILE = 5;
 
 interface CategoryItem {
   name: Category;
   color: string;
 }
 
-/** Decode a Service.location into [longitude, latitude] or null. */
 const getCoordinates = (location: Service['location']): [number, number] | null => {
   if (location && typeof location === 'object' && location.coordinates) return location.coordinates;
   if (typeof location !== 'string') return null;
 
-  // WKT: "POINT(lng lat)" or "SRID=4326;POINT(lng lat)"
   const match = location.match(/(?:SRID=\d+;)?\s*POINT\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)/i);
   if (match) return [Number(match[1]), Number(match[2])];
 
-  // WKB hex (PostGIS binary)
   if (!/^[0-9a-f]+$/i.test(location) || location.length < 34) return null;
   const bytes = new Uint8Array(location.match(/.{2}/g)!.map((pair) => parseInt(pair, 16)));
   const littleEndian = bytes[0] === 1;
@@ -37,7 +38,6 @@ const getCoordinates = (location: Service['location']): [number, number] | null 
   ];
 };
 
-/** Convert a raw Service row into a renderable Place, or null if unusable. */
 const toPlace = (service: Service): Place | null => {
   const coordinates = getCoordinates(service.location);
   if (!coordinates || coordinates.some((coordinate) => !Number.isFinite(coordinate))) return null;
@@ -61,22 +61,36 @@ export default function Home() {
   const [legendOpen, setLegendOpen] = useState(false);
   const [saved, setSaved] = useState<string[]>([]);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
-    const [tracking, setTracking] = useState(false);
-    const [routeTarget, setRouteTarget] = useState<Place | null>(null);
+  const [tracking, setTracking] = useState(false);
+  const [routeTarget, setRouteTarget] = useState<Place | null>(null);
+  const [nearbyOnly, setNearbyOnly] = useState(true);
+
+  const isMobile = useMemo(() => isMobileViewport(), []);
+  const nearbyRadiusKm = isMobile ? NEARBY_RADIUS_KM_MOBILE : NEARBY_RADIUS_KM_DESKTOP;
 
   const mapRef = useRef<any>(null);
   const watchId = useRef<number | null>(null);
   const hasCentered = useRef(false);
 
-  const places = useMemo(
+  const allPlaces = useMemo(
     () => services.map(toPlace).filter((place): place is Place => place !== null),
     [services],
   );
 
+  const places = useMemo(() => {
+    if (userLocation && nearbyOnly) {
+      return allPlaces.filter(
+        (place) => distanceKm(userLocation, place) <= nearbyRadiusKm,
+      );
+    }
+    if (isMobile && !userLocation) return [];
+    return allPlaces;
+  }, [allPlaces, isMobile, nearbyOnly, nearbyRadiusKm, userLocation]);
+
   const categories = useMemo<CategoryItem[]>(
-    () => Array.from(new Set(places.map((place) => place.category)))
+    () => Array.from(new Set(allPlaces.map((place) => place.category)))
       .map((name) => ({ name, color: categoryColor(name) })),
-    [places],
+    [allPlaces],
   );
 
   const visible = useMemo(
@@ -113,22 +127,46 @@ export default function Home() {
       return;
     }
     setTracking(true);
+    setNearbyOnly(true);
     setNotice('Getting your live location...');
     watchId.current = navigator.geolocation.watchPosition(
       (pos) => {
         const { latitude, longitude, accuracy } = pos.coords;
         setUserLocation({ lat: latitude, lng: longitude, accuracy });
-        if (!hasCentered.current) {
+        if (!hasCentered.current && accuracy < 500) {
           mapRef.current?.flyTo([latitude, longitude], 15, { animate: true, duration: 0.7 });
           hasCentered.current = true;
         }
-        setNotice('Showing your live location.');
+        setNotice(
+          accuracy < 100
+            ? 'Showing your live location.'
+            : `Live location ±${Math.round(accuracy)} m — still refining…`,
+        );
       },
-      () => {
-        setNotice('We could not access your location.');
+      (err) => {
+        if (hasCentered.current) {
+          if (err.code === err.PERMISSION_DENIED) {
+            setNotice('Location permission was revoked.');
+            setTracking(false);
+          }
+          return;
+        }
+        switch (err.code) {
+          case err.PERMISSION_DENIED:
+            setNotice('Location permission denied. Enable it in browser settings.');
+            break;
+          case err.POSITION_UNAVAILABLE:
+            setNotice('Location unavailable. Check your device settings.');
+            break;
+          case err.TIMEOUT:
+            setNotice('Location request timed out. Try again.');
+            break;
+          default:
+            setNotice('We could not access your location.');
+        }
         setTracking(false);
       },
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 },
     );
   };
 
@@ -138,16 +176,24 @@ export default function Home() {
     );
   };
 
-  // Clean up the watcher on unmount.
   useEffect(() => {
     if (!notice) return;
-    const timer = setTimeout(() => setNotice(''), 4000);   // 4 seconds
+    const timer = setTimeout(() => setNotice(''), 4000);
     return () => clearTimeout(timer);
   }, [notice]);
 
+  useEffect(
+    () => () => {
+      if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
+    },
+    [],
+  );
+
+  const showMobilePrompt = isMobile && !userLocation && !loading;
+  const showShowAllPill = !!userLocation && nearbyOnly && places.length > 0;
+
   return (
     <main className="guide-shell">
-
       <div className="map-stage">
         <LeafletMap
           places={visible}
@@ -155,8 +201,8 @@ export default function Home() {
           onSelect={selectPlace}
           mapRef={mapRef}
           userLocation={userLocation}
-        incidents={incidents}
-        routeTarget={routeTarget}
+          incidents={incidents}
+          routeTarget={routeTarget}
         />
 
         <header className="masthead">
@@ -176,6 +222,24 @@ export default function Home() {
         {error && <div className="notice">{error}</div>}
         {notice && !loading && <div className="notice">{notice}</div>}
 
+        {showShowAllPill && (
+          <button
+            className="show-all-pill"
+            onClick={() => setNearbyOnly(false)}
+          >
+            Showing {places.length} nearby · Show all
+          </button>
+        )}
+
+        {showMobilePrompt && (
+          <div className="mobile-locate-prompt">
+            <button className="mobile-locate-button" onClick={locate}>
+              <LocateFixed size={18} />
+              Find services near me
+            </button>
+          </div>
+        )}
+
         {selected && (
           <ServicePopup
             place={selected}
@@ -194,7 +258,7 @@ export default function Home() {
           />
         )}
 
-                {routeTarget && (
+        {routeTarget && (
           <button
             className="clear-route"
             onClick={() => {
