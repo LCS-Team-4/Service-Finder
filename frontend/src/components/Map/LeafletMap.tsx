@@ -15,7 +15,7 @@ declare const L: any;
  *  - WKT string: "LINESTRING(lng lat, lng lat, ...)"
  *  - WKB hex string (PostGIS binary)
  */
-const parseIncidentGeometry = (geometry: unknown): [number, number][] => {
+export const parseIncidentGeometry = (geometry: unknown): [number, number][] => {
   if (geometry && typeof geometry === 'object' && 'coordinates' in geometry) {
     const coords = (geometry as { coordinates?: unknown }).coordinates;
     if (Array.isArray(coords)) {

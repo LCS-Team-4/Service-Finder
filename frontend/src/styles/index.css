@@ -655,13 +655,13 @@ input {
 }
 
 .locate.active {
-	background: #22c55e;
-	border-color: #16a34a;
-	color: #fff;
+  background: #22c55e;
+  border-color: #16a34a;
+  color: #fff;
 }
 
 .locate.active:hover {
-	background: #16a34a;
+  background: #16a34a;
 }
 
 .zoom-controls {
@@ -875,10 +875,21 @@ input {
     top: 74px;
   }
   .legend {
-    display: none;
+    position: fixed;
+    inset: auto 12px 70px 12px;
+    width: auto;
+    max-height: 55vh;
+    overflow-y: auto;
+    display: block;
+    z-index: 1300;
   }
   .about {
-    width: min(289px, calc(100% - 24px));
+    position: fixed;
+    inset: auto 12px 70px 12px;
+    width: auto;
+    max-height: 55vh;
+    overflow-y: auto;
+    z-index: 1300;
   }
   .masthead {
     width: 270px;
@@ -1774,10 +1785,10 @@ input {
 }
 
 .clear-route {
-	position: absolute;
-	top: 24px;
-	left: 50px;
-	z-index: 1100;
+  position: absolute;
+  top: 24px;
+  left: 50px;
+  z-index: 1100;
   padding: 10px 18px;
   border: 1px solid #8c6337;
   outline: 2px double #f6d994;
@@ -1795,4 +1806,60 @@ input {
 
 .clear-route:hover {
   background: #f8d991;
+}
+
+.radius-select {
+  position: relative;
+  font-family: 'Cormorant SC', serif;
+}
+
+.radius-select-trigger {
+  padding: 8px 10px;
+  border: 1px solid #9e784e;
+  background: #f8e5b8;
+  color: #5b442c;
+  font-family: 'Cormorant SC', serif;
+  font-size: 12px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.radius-select-caret {
+  font-size: 10px;
+  color: #8a653d;
+}
+
+.radius-select-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 2000;
+  margin: 4px 0 0;
+  padding: 4px 0;
+  list-style: none;
+  min-width: 90px;
+  background: #f8e5b8;
+  border: 1px solid #9e784e;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+.radius-select-menu li {
+  padding: 6px 12px;
+  color: #5b442c;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.radius-select-menu li:hover {
+  background: #e6b466;
+  color: #52391f;
+}
+
+.radius-select-menu li.selected {
+  background: #d9a84f;
+  color: #4a2b16;
+  font-weight: 700;
 }
