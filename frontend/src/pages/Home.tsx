@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, MapPinned, Minus, Plus, X, LocateFixed } from 'lucide-react';
-import LeafletMap from '../components/Map/LeafletMap';
+import LeafletMap, { parseIncidentGeometry } from '../components/Map/LeafletMap';
 import GuideSearch from '../components/SearchBar/GuideSearch';
 import ServicePopup from '../components/ServiceCard/ServicePopup';
 import { CategoryIcon } from '../components/common/CategoryIcon';
@@ -9,9 +9,6 @@ import { useTrafficIncidents } from '../hooks/useTrafficIncidents';
 import { categoryColor } from '../utils/constants';
 import { distanceKm, isMobileViewport } from '../utils/geo';
 import type { Category, Place, Service } from '../types/service.types';
-
-const NEARBY_RADIUS_KM_DESKTOP = 10;
-const NEARBY_RADIUS_KM_MOBILE = 5;
 
 interface CategoryItem {
   name: Category;
@@ -63,10 +60,9 @@ export default function Home() {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
   const [tracking, setTracking] = useState(false);
   const [routeTarget, setRouteTarget] = useState<Place | null>(null);
-  const [nearbyOnly, setNearbyOnly] = useState(true);
+  const [radiusKm, setRadiusKm] = useState<number | null>(5);
 
   const isMobile = useMemo(() => isMobileViewport(), []);
-  const nearbyRadiusKm = isMobile ? NEARBY_RADIUS_KM_MOBILE : NEARBY_RADIUS_KM_DESKTOP;
 
   const mapRef = useRef<any>(null);
   const watchId = useRef<number | null>(null);
@@ -78,14 +74,9 @@ export default function Home() {
   );
 
   const places = useMemo(() => {
-    if (userLocation && nearbyOnly) {
-      return allPlaces.filter(
-        (place) => distanceKm(userLocation, place) <= nearbyRadiusKm,
-      );
-    }
     if (isMobile && !userLocation) return [];
     return allPlaces;
-  }, [allPlaces, isMobile, nearbyOnly, nearbyRadiusKm, userLocation]);
+  }, [allPlaces, isMobile, userLocation]);
 
   const categories = useMemo<CategoryItem[]>(
     () => Array.from(new Set(allPlaces.map((place) => place.category)))
@@ -93,13 +84,30 @@ export default function Home() {
     [allPlaces],
   );
 
-  const visible = useMemo(
-    () => places.filter((p) =>
+  const visible = useMemo(() => {
+    const searched = places.filter((p) =>
       (!active || p.category === active) &&
       `${p.name} ${p.formatted_address ?? ''} ${p.category}`.toLowerCase().includes(query.toLowerCase()),
-    ),
-    [active, places, query],
-  );
+    );
+
+    if (!userLocation || radiusKm === null) return searched;
+
+    return searched.filter(
+      (place) => distanceKm({ lat: place.lat, lng: place.lng }, userLocation) <= radiusKm,
+    );
+  }, [active, places, query, userLocation, radiusKm]);
+
+  const visibleIncidents = useMemo(() => {
+    if (!userLocation || radiusKm === null) return incidents;
+
+    return incidents.filter((incident) => {
+      const coords = parseIncidentGeometry(incident.geometry);
+      if (coords.length === 0) return false;
+      return coords.some(
+        ([lng, lat]) => distanceKm({ lat, lng }, userLocation) <= radiusKm,
+      );
+    });
+  }, [incidents, userLocation, radiusKm]);
 
   const selectPlace = useCallback((place: Place) => {
     setSelected(place);
@@ -127,7 +135,6 @@ export default function Home() {
       return;
     }
     setTracking(true);
-    setNearbyOnly(true);
     setNotice('Getting your live location...');
     watchId.current = navigator.geolocation.watchPosition(
       (pos) => {
@@ -190,7 +197,6 @@ export default function Home() {
   );
 
   const showMobilePrompt = isMobile && !userLocation && !loading;
-  const showShowAllPill = !!userLocation && nearbyOnly && places.length > 0;
 
   return (
     <main className="guide-shell">
@@ -201,7 +207,7 @@ export default function Home() {
           onSelect={selectPlace}
           mapRef={mapRef}
           userLocation={userLocation}
-          incidents={incidents}
+          incidents={visibleIncidents}
           routeTarget={routeTarget}
         />
 
@@ -216,20 +222,13 @@ export default function Home() {
           onSearch={search}
           onLocate={locate}
           tracking={tracking}
+          radiusKm={radiusKm}
+          onRadiusChange={setRadiusKm}
         />
 
         {loading && <div className="notice">Loading services...</div>}
         {error && <div className="notice">{error}</div>}
         {notice && !loading && <div className="notice">{notice}</div>}
-
-        {showShowAllPill && (
-          <button
-            className="show-all-pill"
-            onClick={() => setNearbyOnly(false)}
-          >
-            Showing {places.length} nearby · Show all
-          </button>
-        )}
 
         {showMobilePrompt && (
           <div className="mobile-locate-prompt">
@@ -270,10 +269,22 @@ export default function Home() {
           </button>
         )}
 
-        <button className="panel-trigger about-trigger" onClick={() => setAboutOpen(true)}>
+        <button
+          className="panel-trigger about-trigger"
+          onClick={() => {
+            setAboutOpen((open) => !open);
+            setLegendOpen(false);
+          }}
+        >
           <BookOpen size={17} /> About the Guide
         </button>
-        <button className="panel-trigger legend-trigger" onClick={() => setLegendOpen(true)}>
+        <button
+          className="panel-trigger legend-trigger"
+          onClick={() => {
+            setLegendOpen((open) => !open);
+            setAboutOpen(false);
+          }}
+        >
           <MapPinned size={17} /> Legend
         </button>
 

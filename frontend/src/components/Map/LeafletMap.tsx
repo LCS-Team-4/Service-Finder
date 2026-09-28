@@ -8,9 +8,14 @@ import type { TrafficIncident } from '../../types/traffic.types';
 
 declare const L: any;
 
-const MAX_MARKERS_IN_VIEW = 200;
-
-const parseIncidentGeometry = (geometry: unknown): [number, number][] => {
+/**
+ * Parse a traffic incident's geometry into [lng, lat] pairs.
+ * Handles three formats the backend might produce:
+ *  - GeoJSON object with coordinates array
+ *  - WKT string: "LINESTRING(lng lat, lng lat, ...)"
+ *  - WKB hex string (PostGIS binary)
+ */
+export const parseIncidentGeometry = (geometry: unknown): [number, number][] => {
   if (geometry && typeof geometry === 'object' && 'coordinates' in geometry) {
     const coords = (geometry as { coordinates?: unknown }).coordinates;
     if (Array.isArray(coords)) {
