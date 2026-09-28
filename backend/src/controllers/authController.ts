@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express'
-import { supabase } from '../config/supabase'
+import { supabase, supabaseAuthConfig } from '../config/supabase'
 
 function getErrorMessage(error: unknown, fallback: string) {
 	return error instanceof Error && error.message ? error.message : fallback
@@ -124,7 +124,32 @@ export async function resetPassword(req: Request, res: Response) {
 	const { data, error } = await supabase.auth.getUser(accessToken)
 	if (error || !data.user) return res.status(401).json({ error: 'This reset link is missing or has expired.' })
 
-	const { error: updateError } = await supabase.auth.admin.updateUserById(data.user.id, { password })
-	if (updateError) return res.status(400).json({ error: updateError.message })
+	let updateResponse: globalThis.Response
+	try {
+		updateResponse = await fetch(`${supabaseAuthConfig.url}/auth/v1/user`, {
+			method: 'PUT',
+			headers: {
+				apikey: supabaseAuthConfig.key,
+				Authorization: `Bearer ${accessToken}`,
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify({ password }),
+		})
+	} catch {
+		return res.status(502).json({ error: 'Unable to reach the authentication service.' })
+	}
+
+	if (!updateResponse.ok) {
+		const updateError = await updateResponse.json().catch(() => ({})) as {
+			msg?: string
+			message?: string
+			error_description?: string
+		}
+		const message = updateError.msg || updateError.message || updateError.error_description
+		return res.status(updateResponse.status === 401 ? 401 : 400).json({
+			error: message || 'Unable to update your password.',
+		})
+	}
+
 	return res.json({ message: 'Password updated successfully.' })
 }
