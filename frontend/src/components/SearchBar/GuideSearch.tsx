@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { LocateFixed, Search } from 'lucide-react';
 
 interface GuideSearchProps {
@@ -29,49 +30,8 @@ export default function GuideSearch({
   radiusKm,
   onRadiusChange,
 }: GuideSearchProps) {
-  return (
-    <section className="search-panel">
-      <span className="glass">
-        <Search size={19} />
-      </span>
-      <input
-        value={query}
-        onChange={(event) => onQueryChange(event.target.value)}
-        onKeyDown={(event) => event.key === 'Enter' && onSearch()}
-        placeholder="Search for a place or service..."
-      />
-      <div className="radius-picker">
-        <select
-          value={radiusKm === null ? 'all' : String(radiusKm)}
-          onChange={(event) => {
-            const value = event.target.value;
-            onRadiusChange(value === 'all' ? null : Number(value));
-          }}
-          aria-label="Filter radius"
-        >
-          {RADIUS_OPTIONS.map((option) => (
-            <option
-              key={option.label}
-              value={option.value === null ? 'all' : String(option.value)}
-            >
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </div>
-      <button className="search-button" onClick={onSearch}>
-        Search
-      </button>
-      <button
-        className={`locate${tracking ? ' active' : ''}`}
-        title={tracking ? 'Stop live location' : 'Show my live location'}
-        onClick={onLocate}
-      >
-        <LocateFixed size={17} />
-      </button>
-    </section>
-  );
-}
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -83,7 +43,7 @@ export default function GuideSearch({
   }, [open]);
 
   return (
-        <section className="search-panel">
+    <section className="search-panel">
       <span className="glass">
         <Search size={19} />
       </span>

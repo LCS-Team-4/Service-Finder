@@ -8,6 +8,8 @@ import type { TrafficIncident } from '../../types/traffic.types';
 
 declare const L: any;
 
+const MAX_MARKERS_IN_VIEW = 200;
+
 /**
  * Parse a traffic incident's geometry into [lng, lat] pairs.
  * Handles three formats the backend might produce:
@@ -109,10 +111,6 @@ export default function LeafletMap({
     for (const place of placesRef.current) {
       if (shown >= MAX_MARKERS_IN_VIEW) break;
       if (!bounds.contains([place.lat, place.lng])) continue;
-      // Always render the selected marker even if culling would hide it
-      if (currentSelected && place.name !== currentSelected.name) {
-        // (still count toward the cap)
-      }
       const color = categoryColor(place.category);
       const icon = L.divIcon({
         className: 'cape-marker-wrap',
