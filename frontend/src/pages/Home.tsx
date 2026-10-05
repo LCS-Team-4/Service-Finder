@@ -4,10 +4,13 @@ import LeafletMap, { parseIncidentGeometry } from '../components/Map/LeafletMap'
 import GuideSearch from '../components/SearchBar/GuideSearch';
 import ServicePopup from '../components/ServiceCard/ServicePopup';
 import { CategoryIcon } from '../components/common/CategoryIcon';
+import { IncidentIcon } from '../components/common/IncidentIcon';
 import { useServices } from '../hooks/useServices';
 import { useTrafficIncidents } from '../hooks/useTrafficIncidents';
 import { categoryColor } from '../utils/constants';
+import { buildIncidentLegend } from '../services/trafficLegend';
 import { distanceKm, isMobileViewport } from '../utils/geo';
+import { ScrollHint } from '../components/common/ScrollHint';
 import type { Category, Place, Service } from '../types/service.types';
 
 interface CategoryItem {
@@ -61,12 +64,15 @@ export default function Home() {
   const [tracking, setTracking] = useState(false);
   const [routeTarget, setRouteTarget] = useState<Place | null>(null);
   const [radiusKm, setRadiusKm] = useState<number | null>(5);
+  const [hiddenIncidents, setHiddenIncidents] = useState<Set<number | null>>(() => new Set());
 
   const isMobile = useMemo(() => isMobileViewport(), []);
 
   const mapRef = useRef<any>(null);
   const watchId = useRef<number | null>(null);
   const hasCentered = useRef(false);
+  const legendPanelRef = useRef<HTMLElement>(null);
+  const aboutPanelRef = useRef<HTMLElement>(null);
 
   const allPlaces = useMemo(
     () => services.map(toPlace).filter((place): place is Place => place !== null),
@@ -97,7 +103,7 @@ export default function Home() {
     );
   }, [active, places, query, userLocation, radiusKm]);
 
-  const visibleIncidents = useMemo(() => {
+  const nearbyIncidents = useMemo(() => {
     if (!userLocation || radiusKm === null) return incidents;
 
     return incidents.filter((incident) => {
@@ -108,6 +114,27 @@ export default function Home() {
       );
     });
   }, [incidents, userLocation, radiusKm]);
+
+  const incidentLegend = useMemo(
+    () => buildIncidentLegend(nearbyIncidents),
+    [nearbyIncidents],
+  );
+
+  const visibleIncidents = useMemo(
+    () => nearbyIncidents.filter(
+      (incident) => !hiddenIncidents.has(incident.icon_category ?? null),
+    ),
+    [nearbyIncidents, hiddenIncidents],
+  );
+
+  const toggleIncident = useCallback((code: number | null) => {
+    setHiddenIncidents((current) => {
+      const next = new Set(current);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  }, []);
 
   const selectPlace = useCallback((place: Place) => {
     setSelected(place);
@@ -289,7 +316,7 @@ export default function Home() {
         </button>
 
         {aboutOpen && (
-          <aside className="about popup-panel">
+          <aside className="about popup-panel" ref={aboutPanelRef}>
             <button className="close-panel" aria-label="Close about" onClick={() => setAboutOpen(false)}>
               <X size={17} />
             </button>
@@ -304,11 +331,12 @@ export default function Home() {
         )}
 
         {legendOpen && (
-          <aside className="legend popup-panel">
+          <aside className="legend popup-panel" ref={legendPanelRef}>
             <button className="close-panel" aria-label="Close legend" onClick={() => setLegendOpen(false)}>
               <X size={17} />
             </button>
             <h2>Legend</h2>
+
             {categories.map((item) => (
               <button
                 key={item.name}
@@ -322,10 +350,46 @@ export default function Home() {
                 {item.name}
               </button>
             ))}
+
+            <h3 className="legend-heading">
+              Traffic &amp; road works
+              <span className="legend-count">
+                {visibleIncidents.length}/{nearbyIncidents.length}
+              </span>
+            </h3>
+
+            {incidentLegend.length === 0 ? (
+              <p className="legend-hint">No incidents reported nearby.</p>
+            ) : (
+              incidentLegend.map((item) => (
+                <button
+                  key={item.label}
+                  className={hiddenIncidents.has(item.code) ? 'legend-toggle off' : 'legend-toggle'}
+                  aria-pressed={!hiddenIncidents.has(item.code)}
+                  title={`${hiddenIncidents.has(item.code) ? 'Show' : 'Hide'} ${item.label.toLowerCase()}`}
+                  onClick={() => toggleIncident(item.code)}
+                >
+                  <i style={{ background: item.color }}><IncidentIcon category={item.code} /></i>
+                  {item.label}
+                  <span className="legend-count">{item.count}</span>
+                </button>
+              ))
+            )}
+
+            {hiddenIncidents.size > 0 && (
+              <button
+                className="legend-show-all"
+                onClick={() => setHiddenIncidents(new Set())}
+              >
+                Show all road events
+              </button>
+            )}
+
             <button className="you-are" onClick={locate}>
               <i><MapPinned size={16} /></i>
               You Are Here
             </button>
+            <ScrollHint targetRef={legendPanelRef} label="Scroll for more" />
           </aside>
         )}
 
