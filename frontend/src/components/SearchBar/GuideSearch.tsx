@@ -1,10 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { LocateFixed, Search } from 'lucide-react';
+import { LocateFixed, Navigation, Search } from 'lucide-react';
+import type { Place } from '../../types/service.types';
 
 interface GuideSearchProps {
   query: string;
   onQueryChange: (query: string) => void;
   onSearch: () => void;
+  suggestions: Array<{ place: Place; distanceKm: number | null }>;
+  showSuggestions: boolean;
+  locationStatus: 'idle' | 'locating' | 'unavailable';
+  onSelectSuggestion: (place: Place) => void;
+  onGetDirections: (place: Place) => void;
   onLocate: () => void;
   tracking: boolean;
   radiusKm: number | null;
@@ -29,6 +35,11 @@ export default function GuideSearch({
   query,
   onQueryChange,
   onSearch,
+  suggestions,
+  showSuggestions,
+  locationStatus,
+  onSelectSuggestion,
+  onGetDirections,
   onLocate,
   tracking,
   radiusKm,
@@ -70,6 +81,45 @@ export default function GuideSearch({
         >
           <LocateFixed size={17} />
         </button>
+
+        {showSuggestions && (
+          <div className="search-results" role="list" aria-label="Services in this category">
+            {locationStatus === 'locating' && (
+              <p className="search-results-status">Finding your location to sort nearby services...</p>
+            )}
+            {locationStatus === 'unavailable' && (
+              <p className="search-results-status">Location unavailable. Services are shown alphabetically.</p>
+            )}
+            {suggestions.length === 0 ? (
+              <p className="search-results-status">No services found in this category.</p>
+            ) : (
+              suggestions.map(({ place, distanceKm }) => (
+                <div className="search-result" key={place.id}>
+                  <button
+                    type="button"
+                    className="search-result-info"
+                    onClick={() => onSelectSuggestion(place)}
+                  >
+                    <span className="search-result-name">{place.name}</span>
+                    <span className="search-result-detail">
+                      {place.formatted_address ?? place.category}
+                      {distanceKm !== null && ` · ${distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1)} km`}`}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="search-result-directions"
+                    onClick={() => onGetDirections(place)}
+                    aria-label={`Get directions to ${place.name}`}
+                  >
+                    <Navigation size={15} />
+                    Directions
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        )}
 
         {/* Desktop dropdown — hidden below 780px by CSS */}
         <div className="radius-select" ref={ref}>

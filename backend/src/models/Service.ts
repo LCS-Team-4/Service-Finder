@@ -11,6 +11,12 @@ export interface ServiceDetails {
         name: string
         slug: string
         parent_id: string | null
+        parent?: {
+            id: string
+            name: string
+            slug: string
+            parent_id: string | null
+        } | null
     } | null
     formatted_address: string
     location: string

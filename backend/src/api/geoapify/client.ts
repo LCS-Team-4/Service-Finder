@@ -4,7 +4,7 @@ import { ensureServiceCategories, resolveCategorySlug } from '../../services/cat
 
 setRateLimit('geoapify', 10, 60_000)
 
-const geoapifyUrl = requireEnv('GEOAPIFY_URL', process.env.GEOAPIFY_URL)
+const geoapifyUrl = process.env.GEOAPIFY_URL ?? 'https://api.geoapify.com/v2/places'
 
 const southAfricaRegions = [
   [16.45, -34.85, 20.58, -28.48],
