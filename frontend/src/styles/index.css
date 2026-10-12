@@ -535,7 +535,7 @@ a {
 	top: 11px;
 	left: 50%;
 	transform: translateX(-50%);
-	width: 318px;
+	width: auto;
 	text-align: center;
 	padding: 8px 14px 10px;
 	background: linear-gradient(90deg, #edc57e, #f5d28d, #e8bb70);
@@ -1190,39 +1190,37 @@ a {
 	}
 
 	.masthead {
-		width: 270px;
+		width: auto;
+		max-width: 240px;
+		padding: 5px 12px 6px;
 	}
 
+	.masthead h1 {
+		font-size: 16px;
+		letter-spacing: 2px;
+	}
+
+	.masthead p {
+		font-size: 10px;
+		letter-spacing: 2px;
+	}
+
+@media (max-width: 780px) {
 	.legend,
 	.about {
 		position: fixed;
-		inset: 80px 12px 70px 12px;
+		left: 12px;
+		right: 12px;
+		bottom: 70px;
+		top: auto;
 		width: auto;
-		max-height: none;
+		max-height: 50vh; /* Limit to half the viewport height */
 		overflow-y: auto;
 		overscroll-behavior: contain;
 		-webkit-overflow-scrolling: touch;
 		display: block;
 		z-index: 1300;
-		padding-bottom: 40px;
-		background-image:
-			linear-gradient(145deg,
-				rgba(245, 209, 144, .98),
-				rgba(235, 184, 103, .98)),
-			linear-gradient(to top, rgba(88, 46, 15, .12), transparent 40px);
-		background-attachment: local, scroll;
 	}
-
-	.legend::after,
-	.about::after {
-		content: '';
-		position: sticky;
-		display: block;
-		bottom: 0;
-		height: 24px;
-		margin: -24px -25px 0;
-		pointer-events: none;
-		background: linear-gradient(to top, rgba(235, 184, 103, .95), rgba(235, 184, 103, 0));
 	}
 
 	.service-popup {
@@ -1331,35 +1329,23 @@ a {
 		display: block;
 		position: absolute;
 		z-index: 1000;
-		top: 143px;
+		top: 138px;
 		left: 50%;
 		transform: translateX(-50%);
 		width: calc(100% - 84px);
-		padding: 10px 14px 6px;
+		padding: 4px 14px;
 		background: linear-gradient(90deg, #f8d188, #ebbd71);
 		border: 1px solid #c59357;
 		box-shadow: 0 3px 7px #72502a66;
 	}
 
 	.radius-slider-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: baseline;
-		margin-bottom: 6px;
-		color: #52391f;
-		text-transform: uppercase;
-		font: 600 11px 'Cormorant SC', serif;
-		letter-spacing: 1.5px;
-	}
-
-	.radius-slider-value {
-		color: #2c1b0c;
-		font-weight: 700;
+		display: none;
 	}
 
 	.radius-slider input[type='range'] {
 		width: 100%;
-		height: 22px;
+		height: 18px;
 		appearance: none;
 		-webkit-appearance: none;
 		background: transparent;
@@ -1402,18 +1388,14 @@ a {
 	.radius-slider-scale {
 		display: flex;
 		justify-content: space-between;
-		margin-top: -2px;
+		margin-top: -4px;
 		color: #85603a;
-		font: 600 10px 'Cormorant SC', serif;
+		font: 600 9px 'Cormorant SC', serif;
 		letter-spacing: 1px;
 	}
 
 	.notice {
-		top: 210px;
-	}
-
-	.legend {
-		display: block !important;
+		top: 178px;
 	}
 }
 
