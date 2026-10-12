@@ -22,28 +22,22 @@ async function isCacheStale(): Promise<boolean> {
 
 export async function refreshServicesIfStale(): Promise<boolean> {
   log('refreshServicesIfStale called');
-  try {
-    if (!(await isCacheStale())) { log('cache fresh, skipping'); return false; }
+  if (!(await isCacheStale())) { log('cache fresh, skipping'); return false; }
 
-    log('fetching from backend...');
-    const rows = await getServices({ limit: 500 });
-    log(`got ${rows.length} rows`);
-    log(`first row name: ${rows[0]?.name ?? '(none)'}`);
-    log(`first row location type: ${typeof rows[0]?.location}`);
-    log(`first row location value: ${String(rows[0]?.location).slice(0, 50)}`);
+  log('fetching from backend...');
+  const rows = await getServices({ limit: 500 });
+  log(`got ${rows.length} rows`);
+  log(`first row name: ${rows[0]?.name ?? '(none)'}`);
+  log(`first row location type: ${typeof rows[0]?.location}`);
+  log(`first row location value: ${String(rows[0]?.location).slice(0, 50)}`);
 
-    await db.transaction('rw', db.services, db.meta, async () => {
-      await db.services.clear();
-      await db.services.bulkPut(rows);
-      await db.meta.put({ key: 'services_last_synced', value: String(Date.now()) });
-    });
-    log(`wrote ${rows.length} rows to dexie`);
-    return true;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log(`ERROR: ${msg}`);
-    return false;
-  }
+  await db.transaction('rw', db.services, db.meta, async () => {
+    await db.services.clear();
+    await db.services.bulkPut(rows);
+    await db.meta.put({ key: 'services_last_synced', value: String(Date.now()) });
+  });
+  log(`wrote ${rows.length} rows to dexie`);
+  return true;
 }
 
 export async function getCachedServices(): Promise<Service[]> {

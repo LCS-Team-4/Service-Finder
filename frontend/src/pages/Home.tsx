@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, MapPinned, Minus, Plus, X, LocateFixed } from 'lucide-react';
+import { BookOpen, Layers, MapPinned, Minus, Plus, X, LocateFixed } from 'lucide-react';
 import LeafletMap, { parseIncidentGeometry } from '../components/Map/LeafletMap';
+import WeatherWidget from '../components/Map/WeatherWidget';
 import GuideSearch from '../components/SearchBar/GuideSearch';
 import ServicePopup from '../components/ServiceCard/ServicePopup';
 import { CategoryIcon } from '../components/common/CategoryIcon';
 import { IncidentIcon } from '../components/common/IncidentIcon';
 import { useServices } from '../hooks/useServices';
 import { useTrafficIncidents } from '../hooks/useTrafficIncidents';
+import { useWeather } from '../hooks/useWeather';
 import { categoryColor } from '../utils/constants';
 import { buildIncidentLegend } from '../services/trafficLegend';
 import { distanceKm, isMobileViewport } from '../utils/geo';
@@ -17,6 +19,14 @@ interface CategoryItem {
   name: Category;
   color: string;
 }
+
+interface UserLocation {
+  lat: number;
+  lng: number;
+  accuracy: number;
+}
+
+const DEFAULT_WEATHER_LOCATION = { lat: -33.96, lng: 18.5 };
 
 const getCoordinates = (location: Service['location']): [number, number] | null => {
   if (location && typeof location === 'object' && location.coordinates) return location.coordinates;
@@ -44,6 +54,7 @@ const toPlace = (service: Service): Place | null => {
   return {
     ...service,
     category: service.category?.name ?? service.type ?? 'Service',
+    parentCategory: service.category?.parent?.name ?? null,
     lat: coordinates[1],
     lng: coordinates[0],
   };
@@ -60,16 +71,22 @@ export default function Home() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [legendOpen, setLegendOpen] = useState(false);
   const [saved, setSaved] = useState<string[]>([]);
-  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
+  const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
   const [tracking, setTracking] = useState(false);
+  const [satellite, setSatellite] = useState(false);
   const [routeTarget, setRouteTarget] = useState<Place | null>(null);
+  const [searchLocationStatus, setSearchLocationStatus] = useState<'idle' | 'locating' | 'unavailable'>('idle');
   const [radiusKm, setRadiusKm] = useState<number | null>(5);
   const [hiddenIncidents, setHiddenIncidents] = useState<Set<number | null>>(() => new Set());
+  const weatherLocation = userLocation ?? DEFAULT_WEATHER_LOCATION;
+  const { weather, error: weatherError, now } = useWeather(weatherLocation.lat, weatherLocation.lng);
 
   const isMobile = useMemo(() => isMobileViewport(), []);
 
   const mapRef = useRef<any>(null);
   const watchId = useRef<number | null>(null);
+  const locationRequest = useRef<Promise<UserLocation> | null>(null);
+  const requestedCategoryLocation = useRef('');
   const hasCentered = useRef(false);
   const legendPanelRef = useRef<HTMLElement>(null);
   const aboutPanelRef = useRef<HTMLElement>(null);
@@ -90,6 +107,92 @@ export default function Home() {
     [allPlaces],
   );
 
+  const matchingCategoryNames = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    if (!normalizedQuery) return [];
+    return Array.from(new Set(allPlaces
+      .filter((place) => {
+        const category = place.category.toLocaleLowerCase();
+        const parent = place.parentCategory?.toLocaleLowerCase() ?? '';
+        return category.includes(normalizedQuery)
+          || normalizedQuery.includes(category)
+          || parent.includes(normalizedQuery)
+          || (parent && normalizedQuery.includes(parent));
+      })
+      .map((place) => place.category)));
+  }, [allPlaces, query]);
+
+  const categorySuggestions = useMemo(() => {
+    if (matchingCategoryNames.length === 0) return [];
+    return allPlaces
+      .filter((place) => matchingCategoryNames.includes(place.category))
+      .map((place) => ({
+        place,
+        distanceKm: userLocation
+          ? distanceKm({ lat: place.lat, lng: place.lng }, userLocation)
+          : null,
+      }))
+      .sort((a, b) => {
+        if (a.distanceKm !== null && b.distanceKm !== null) return a.distanceKm - b.distanceKm;
+        if (a.distanceKm !== null) return -1;
+        if (b.distanceKm !== null) return 1;
+        return a.place.name.localeCompare(b.place.name);
+      });
+  }, [allPlaces, matchingCategoryNames, userLocation]);
+
+  const requestCurrentLocation = useCallback((): Promise<UserLocation> => {
+    if (userLocation) return Promise.resolve(userLocation);
+    if (!navigator.geolocation) return Promise.reject(new Error('Geolocation is not supported on this device.'));
+    if (locationRequest.current) return locationRequest.current;
+
+    locationRequest.current = new Promise<UserLocation>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const location = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            accuracy: position.coords.accuracy,
+          };
+          setUserLocation(location);
+          resolve(location);
+        },
+        (error) => {
+          const message = error.code === error.PERMISSION_DENIED
+            ? 'Location permission denied. Enable it in browser settings to sort nearby services and get directions.'
+            : error.code === error.TIMEOUT
+              ? 'Location request timed out. Try again.'
+              : 'Location unavailable. Check your device settings.';
+          reject(new Error(message));
+        },
+        { enableHighAccuracy: true, maximumAge: 30000, timeout: 20000 },
+      );
+    }).finally(() => {
+      locationRequest.current = null;
+    });
+
+    return locationRequest.current;
+  }, [userLocation]);
+
+  useEffect(() => {
+    if (matchingCategoryNames.length === 0) {
+      requestedCategoryLocation.current = '';
+      setSearchLocationStatus('idle');
+      return;
+    }
+    if (userLocation) {
+      setSearchLocationStatus('idle');
+      return;
+    }
+
+    const categoryKey = matchingCategoryNames.join('|');
+    if (requestedCategoryLocation.current === categoryKey) return;
+    requestedCategoryLocation.current = categoryKey;
+    setSearchLocationStatus('locating');
+    requestCurrentLocation()
+      .then(() => setSearchLocationStatus('idle'))
+      .catch(() => setSearchLocationStatus('unavailable'));
+  }, [matchingCategoryNames, requestCurrentLocation, userLocation]);
+
   const visible = useMemo(() => {
     const searched = places.filter((p) =>
       (!active || p.category === active) &&
@@ -103,28 +206,16 @@ export default function Home() {
     );
   }, [active, places, query, userLocation, radiusKm]);
 
-  const nearbyIncidents = useMemo(() => {
-    if (!userLocation || radiusKm === null) return incidents;
-
-    return incidents.filter((incident) => {
-      const coords = parseIncidentGeometry(incident.geometry);
-      if (coords.length === 0) return false;
-      return coords.some(
-        ([lng, lat]) => distanceKm({ lat, lng }, userLocation) <= radiusKm,
-      );
-    });
-  }, [incidents, userLocation, radiusKm]);
-
   const incidentLegend = useMemo(
-    () => buildIncidentLegend(nearbyIncidents),
-    [nearbyIncidents],
+    () => buildIncidentLegend(incidents),
+    [incidents],
   );
 
   const visibleIncidents = useMemo(
-    () => nearbyIncidents.filter(
+    () => incidents.filter(
       (incident) => !hiddenIncidents.has(incident.icon_category ?? null),
     ),
-    [nearbyIncidents, hiddenIncidents],
+    [incidents, hiddenIncidents],
   );
 
   const toggleIncident = useCallback((code: number | null) => {
@@ -141,10 +232,59 @@ export default function Home() {
     mapRef.current?.flyTo([place.lat, place.lng], 15, { animate: true, duration: 0.7 });
   }, []);
 
-  const search = () => {
-    const first = visible[0];
+  const search = async () => {
+    let results = matchingCategoryNames.length > 0
+      ? categorySuggestions
+      : visible.map((place) => ({
+          place,
+          distanceKm: userLocation ? distanceKm({ lat: place.lat, lng: place.lng }, userLocation) : null,
+        }));
+
+    if (matchingCategoryNames.length > 0 && !userLocation) {
+      setSearchLocationStatus('locating');
+      try {
+        const location = await requestCurrentLocation();
+        results = allPlaces
+          .filter((place) => matchingCategoryNames.includes(place.category))
+          .map((place) => ({
+            place,
+            distanceKm: distanceKm({ lat: place.lat, lng: place.lng }, location),
+          }))
+          .sort((a, b) => a.distanceKm! - b.distanceKm!);
+        setSearchLocationStatus('idle');
+      } catch {
+        setSearchLocationStatus('unavailable');
+      }
+    }
+
+    const first = results[0]?.place;
     if (first) selectPlace(first);
-    setNotice(first ? `${visible.length} place${visible.length === 1 ? '' : 's'} found` : 'No places found');
+    setNotice(first ? `${results.length} place${results.length === 1 ? '' : 's'} found` : 'No places found');
+  };
+
+  const getDirections = async (place: Place) => {
+    let origin = userLocation;
+    if (!origin) {
+      setNotice('Getting your current location for directions...');
+      try {
+        origin = await requestCurrentLocation();
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : 'Unable to get your current location.');
+        return;
+      }
+    }
+
+    mapRef.current?.flyTo([origin.lat, origin.lng], 18, { animate: true, duration: 0.7 });
+    setSelected(null);
+    setRouteTarget(place);
+    setNotice(`Getting road directions to ${place.name}...`);
+  };
+
+  const selectSuggestion = (place: Place) => {
+    setQuery(place.name);
+    setSelected(place);
+    setRouteTarget(null);
+    mapRef.current?.flyTo([place.lat, place.lng], 15, { animate: true, duration: 0.7 });
   };
 
   const locate = () => {
@@ -153,11 +293,17 @@ export default function Home() {
       return;
     }
     if (tracking) {
+      const lastLocation = userLocation;
       if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
       watchId.current = null;
       hasCentered.current = false;
       setTracking(false);
       setUserLocation(null);
+      mapRef.current?.flyTo(
+        lastLocation ? [lastLocation.lat, lastLocation.lng] : [-33.96, 18.5],
+        11,
+        { animate: true, duration: 0.8 },
+      );
       setNotice('Live location turned off.');
       return;
     }
@@ -229,10 +375,11 @@ export default function Home() {
     <main className="guide-shell">
       <div className="map-stage">
         <LeafletMap
-          places={visible}
+          places={routeTarget ? [routeTarget] : visible}
           selected={selected}
           onSelect={selectPlace}
           mapRef={mapRef}
+          satellite={satellite}
           userLocation={userLocation}
           incidents={visibleIncidents}
           routeTarget={routeTarget}
@@ -247,6 +394,11 @@ export default function Home() {
           query={query}
           onQueryChange={setQuery}
           onSearch={search}
+          suggestions={categorySuggestions}
+          showSuggestions={!routeTarget && matchingCategoryNames.length > 0}
+          locationStatus={searchLocationStatus}
+          onSelectSuggestion={selectSuggestion}
+          onGetDirections={getDirections}
           onLocate={locate}
           tracking={tracking}
           radiusKm={radiusKm}
@@ -275,12 +427,7 @@ export default function Home() {
               setRouteTarget(null);
             }}
             onSave={() => toggleSave(selected.name)}
-            onViewDetails={() => setNotice(`More details for ${selected.name} coming soon.`)}
-            onGetDirections={() => {
-              setRouteTarget(selected);
-              setSelected(null);
-              setNotice(`Getting road directions to ${selected.name}...`);
-            }}
+            onGetDirections={() => getDirections(selected)}
           />
         )}
 
@@ -288,13 +435,40 @@ export default function Home() {
           <button
             className="clear-route"
             onClick={() => {
+              if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
+              watchId.current = null;
+              hasCentered.current = false;
+              setTracking(false);
+              setUserLocation(null);
               setRouteTarget(null);
-              setNotice('');
+              setSelected(null);
+              setQuery('');
+              setActive(null);
+              setRadiusKm(null);
+              mapRef.current?.flyTo([-33.96, 18.5], 11, { animate: true, duration: 0.8 });
+              setNotice('Route cleared. Showing all services.');
             }}
           >
             Clear route
           </button>
         )}
+
+        <WeatherWidget
+          weather={weather}
+          error={weatherError}
+          now={now}
+          locationLabel={userLocation ? 'Your location' : 'Cape Town'}
+        />
+
+        <button
+          type="button"
+          className="map-layer-toggle"
+          aria-pressed={satellite}
+          onClick={() => setSatellite((current) => !current)}
+        >
+          <Layers size={16} />
+          {satellite ? 'Street map' : 'Satellite'}
+        </button>
 
         <button
           className="panel-trigger about-trigger"
@@ -354,7 +528,7 @@ export default function Home() {
             <h3 className="legend-heading">
               Traffic &amp; road works
               <span className="legend-count">
-                {visibleIncidents.length}/{nearbyIncidents.length}
+                {visibleIncidents.length}/{incidents.length}
               </span>
             </h3>
 

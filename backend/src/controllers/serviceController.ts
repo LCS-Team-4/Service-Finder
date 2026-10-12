@@ -13,7 +13,7 @@ export async function getServices(req: Request, res: Response, next: NextFunctio
 
 		let query = supabase
 			.from('services')
-			.select('*, category:service_categories(id,name,slug,parent_id)')
+			.select('*, category:service_categories(id,name,slug,parent_id,parent:service_categories!service_categories_parent_id_fkey(id,name,slug,parent_id))')
 			.limit(limit)
 
 		if (type) query = query.eq('category.slug', type)
