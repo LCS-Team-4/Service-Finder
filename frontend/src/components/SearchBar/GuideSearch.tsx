@@ -88,7 +88,11 @@ export default function GuideSearch({
               <p className="search-results-status">Finding your location to sort nearby services...</p>
             )}
             {locationStatus === 'unavailable' && (
-              <p className="search-results-status">Location unavailable. Services are shown alphabetically.</p>
+              <p className="search-results-status">
+                {radiusKm === null
+                  ? 'Location unavailable. Services are shown alphabetically.'
+                  : 'Location unavailable. Enable location or select All to see services.'}
+              </p>
             )}
             {suggestions.length === 0 ? (
               <p className="search-results-status">No services found in this category.</p>
