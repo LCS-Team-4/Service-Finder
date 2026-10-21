@@ -8,6 +8,7 @@ function Signup() {
 	const [form, setForm] = useState({ firstName: '', lastName: '', phoneNumber: '', email: '', password: '', confirmPassword: '' });
 	const [message, setMessage] = useState('');
 	const [isSuccess, setIsSuccess] = useState(false);
+	const [isSubmitting, setIsSubmitting] = useState(false);
 
 	function updateField(field: keyof typeof form, value: string) {
 		setForm({ ...form, [field]: value });
@@ -38,6 +39,9 @@ function Signup() {
 			setMessage('Passwords do not match.');
 			return;
 		}
+		if (isSubmitting) return;
+
+		setIsSubmitting(true);
 		try {
 			const response = await signupRequest(form.firstName.trim(), form.lastName.trim(), form.phoneNumber.trim(), form.email.trim(), form.password);
 			setIsSuccess(true);
@@ -48,6 +52,8 @@ function Signup() {
 		} catch (error) {
 			setIsSuccess(false);
 			setMessage(error instanceof Error ? error.message : 'Unable to create your account.');
+		} finally {
+			setIsSubmitting(false);
 		}
 	}
 
@@ -69,7 +75,7 @@ function Signup() {
 					<div className="auth-field"><label className="field-label" htmlFor="signup-email">Email address</label><input className="auth-input" id="signup-email" type="email" value={form.email} onChange={(event) => updateField('email', event.target.value)} placeholder="Email address" autoComplete="email" /></div>
 					<div className="auth-field"><label className="field-label" htmlFor="signup-password">Password</label><input className="auth-input" id="signup-password" type="password" value={form.password} onChange={(event) => updateField('password', event.target.value)} placeholder="Password" autoComplete="new-password" /></div>
 					<div className="auth-field"><label className="field-label" htmlFor="signup-confirm-password">Confirm password</label><input className="auth-input" id="signup-confirm-password" type="password" value={form.confirmPassword} onChange={(event) => updateField('confirmPassword', event.target.value)} placeholder="Confirm password" autoComplete="new-password" /></div>
-					<button className="submit-button" type="submit">Create Account <span aria-hidden="true">→</span></button>
+					<button className="submit-button" type="submit" disabled={isSubmitting}>{isSubmitting ? 'Creating account...' : <>Create Account <span aria-hidden="true">→</span></>}</button>
 				</form>
 				<p className="signup-prompt">Already have an account? <Link to="/login">Log In</Link></p>
 			</div>

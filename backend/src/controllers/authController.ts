@@ -5,6 +5,14 @@ function getErrorMessage(error: unknown, fallback: string) {
 	return error instanceof Error && error.message ? error.message : fallback
 }
 
+function isRateLimitError(error: unknown) {
+	return typeof error === 'object' && error !== null
+		&& (
+			('status' in error && error.status === 429)
+			|| ('code' in error && error.code === 'over_email_send_rate_limit')
+		)
+}
+
 
 export async function login(req: Request, res: Response) {
 	const { email, password } = req.body as { email?: string; password?: string }
@@ -58,11 +66,11 @@ export async function signup(req: Request, res: Response) {
 		: await supabase.auth.signUp({
 			email,
 			password,
-			options: { data: { full_name: name } },
+			options: { data: { full_name: `${normalizedFirstName} ${normalizedLastName}` } },
 		})
 
 	if (error || !data.user) {
-		if (error?.code === 'over_email_send_rate_limit') {
+		if (isRateLimitError(error)) {
 			return res.status(429).json({ error: 'Supabase has temporarily limited confirmation emails. Wait before trying again or configure custom SMTP in Supabase.' })
 		}
 		return res.status(400).json({ error: getErrorMessage(error, 'Unable to create your account.') })

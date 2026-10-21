@@ -6,7 +6,7 @@ import type { TrafficIncidentFeature, TrafficIncidentsResponse } from '../../typ
 
 setRateLimit('tomtom', 10, 60_000)
 
-const tomtomUrl = requireEnv('TOMTOM_URL', process.env.TOMTOM_URL)
+const tomtomUrl = process.env.TOMTOM_URL ?? 'https://api.tomtom.com/traffic/services/5/incidentDetails'
 const tomtomSearchUrl = process.env.TOMTOM_SEARCH_URL ?? 'https://api.tomtom.com/search/2'
 const tomtomBbox = process.env.TOMTOM_BBOX ?? '18.35,-34.35,19.00,-33.75'
 const incidentFields = '{incidents{type,geometry{type,coordinates},properties{iconCategory,magnitudeOfDelay,events{description,code,iconCategory},from,to,length,delay,roadNumbers,timeValidity}}}'

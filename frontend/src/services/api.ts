@@ -1,7 +1,7 @@
 import type { Service } from '../types/service.types';
 import type { TrafficIncident } from '../types/traffic.types';
 
-const configuredApiUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api').replace(/\/+$/, '');
+const configuredApiUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '');
 const API_BASE_URL = configuredApiUrl.endsWith('/api') ? configuredApiUrl : `${configuredApiUrl}/api`;
 
 type ApiError = { error?: string };
@@ -18,13 +18,21 @@ async function request<T>(path: string, options: RequestInit): Promise<T> {
       },
     });
   } catch {
-    throw new Error('Unable to reach the authentication server. Start the backend and check its Supabase configuration.');
+    throw new Error(`Unable to reach the backend API at ${API_BASE_URL}. Start the backend and check its Supabase configuration.`);
   }
 
   const contentType = response.headers.get('content-type') ?? '';
   if (!contentType.includes('application/json')) {
     const preview = await response.text();
-    throw new Error(`Expected JSON, got "${contentType}": ${preview.slice(0, 150)}`);
+    const responseStatus = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
+    if (!preview.trim()) {
+      throw new Error(
+        `The backend returned an empty non-JSON response (${responseStatus}). Check the backend terminal for startup errors, confirm SUPABASE_URL and SUPABASE_SERVICE_KEY are set, and ensure only one backend is using port 5000.`,
+      );
+    }
+    throw new Error(
+      `The backend returned a non-JSON response (${responseStatus}, ${contentType || 'unknown content type'}): ${preview.slice(0, 150)}`,
+    );
   }
 
   const payload = await response.json() as T & ApiError;

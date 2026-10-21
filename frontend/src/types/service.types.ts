@@ -23,6 +23,12 @@ export interface Service {
     name: string;
     slug: string;
     parent_id: string | null;
+    parent?: {
+      id: string;
+      name: string;
+      slug: string;
+      parent_id: string | null;
+    } | null;
   } | null;
 }
 
@@ -30,6 +36,7 @@ export type Category = string;
 
 export type Place = Omit<Service, 'category'> & {
   category: Category;
+  parentCategory: string | null;
   lat: number;
   lng: number;
 };

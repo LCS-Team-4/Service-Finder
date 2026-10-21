@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Bookmark, Clock3, MapPinned, Navigation, Phone, X, Globe, Accessibility } from 'lucide-react';
 import { CategoryIcon } from '../common/CategoryIcon';
 import { categoryColor } from '../../utils/constants';
@@ -8,7 +9,6 @@ interface ServicePopupProps {
   saved: boolean;
   onClose: () => void;
   onSave: () => void;
-  onViewDetails: () => void;
   onGetDirections: () => void;
 }
 
@@ -17,9 +17,10 @@ export default function ServicePopup({
   saved,
   onClose,
   onSave,
-  onViewDetails,
   onGetDirections,
 }: ServicePopupProps) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+
   return (
     <section className="service-popup">
       <button className="service-close" aria-label="Close service" onClick={onClose}>
@@ -41,25 +42,31 @@ export default function ServicePopup({
           <MapPinned size={17} />
           <span>{place.formatted_address ?? 'Address unavailable'}</span>
         </p>
-        {place.opening_hours && (
-          <p><Clock3 size={17} />{place.opening_hours}</p>
-        )}
-        {place.phone && (
-          <p><Phone size={17} />{place.phone}</p>
-        )}
-        {place.website && (
-          <p>
-            <Globe size={17} />
-            <a href={place.website} target="_blank" rel="noreferrer">Visit website</a>
-          </p>
-        )}
-        {place.wheelchair && (
-          <p><Accessibility size={17} />Wheelchair access: {place.wheelchair}</p>
+        {detailsOpen && (
+          <>
+            {place.opening_hours && (
+              <p><Clock3 size={17} />{place.opening_hours}</p>
+            )}
+            {place.phone && (
+              <p><Phone size={17} />{place.phone}</p>
+            )}
+            {place.website && (
+              <p>
+                <Globe size={17} />
+                <a href={place.website} target="_blank" rel="noreferrer">Visit website</a>
+              </p>
+            )}
+            {place.wheelchair && (
+              <p><Accessibility size={17} />Wheelchair access: {place.wheelchair}</p>
+            )}
+          </>
         )}
       </div>
 
       <div className="service-actions">
-        <button onClick={onViewDetails}>View Details</button>
+        <button onClick={() => setDetailsOpen((open) => !open)}>
+          {detailsOpen ? 'Hide Details' : 'View Details'}
+        </button>
         <button className="directions" onClick={onGetDirections}>
           <Navigation size={14} />
           Get Directions

@@ -64,6 +64,7 @@ interface LeafletMapProps {
   selected: Place | null;
   onSelect: (place: Place) => void;
   mapRef: React.MutableRefObject<any>;
+  satellite: boolean;
   userLocation: { lat: number; lng: number; accuracy: number } | null;
   incidents: TrafficIncident[];
   routeTarget: Place | null;
@@ -74,6 +75,7 @@ export default function LeafletMap({
   selected,
   onSelect,
   mapRef,
+  satellite,
   userLocation,
   incidents,
   routeTarget,
@@ -81,8 +83,8 @@ export default function LeafletMap({
   const root = useRef<HTMLDivElement>(null);
   const layer = useRef<any>(null);
   const incidentLayer = useRef<any>(null);
+  const tileLayer = useRef<any>(null);
   const userMarker = useRef<any>(null);
-  const accuracyCircle = useRef<any>(null);
   const routeLine = useRef<any>(null);
   const lastRouteKey = useRef<string>('');
 
@@ -132,16 +134,11 @@ export default function LeafletMap({
     const map = mapRef.current;
     if (!map || !incidentLayer.current) return;
 
-    const bounds = map.getBounds();
     incidentLayer.current.clearLayers();
 
     for (const incident of incidentsRef.current) {
       const coordinates = parseIncidentGeometry(incident.geometry);
       if (coordinates.length < 2) continue;
-
-      // Quick check: is any point of this incident inside the viewport?
-      const inView = coordinates.some(([lng, lat]) => bounds.contains([lat, lng]));
-      if (!inView) continue;
 
       const isRoadWorks = incident.icon_category === 9;
       const color = isRoadWorks ? '#c56a24' : '#b5362d';
@@ -173,7 +170,7 @@ export default function LeafletMap({
     if (!root.current || !L) return;
     const map = L.map(root.current, { zoomControl: false, attributionControl: true })
       .setView([-33.96, 18.5], 11);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    tileLayer.current = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '© OpenStreetMap contributors',
     }).addTo(map);
@@ -195,6 +192,23 @@ export default function LeafletMap({
       map.remove();
     };
   }, [mapRef, renderMarkersInView, renderIncidentsInView]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !tileLayer.current) return;
+
+    map.removeLayer(tileLayer.current);
+    tileLayer.current = satellite
+      ? L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+          maxZoom: 19,
+          attribution: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics',
+        })
+      : L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '© OpenStreetMap contributors',
+        });
+    tileLayer.current.addTo(map);
+  }, [mapRef, satellite]);
 
   // 2. Re-render when the data changes
   useEffect(() => {
@@ -227,13 +241,9 @@ export default function LeafletMap({
         map.removeLayer(userMarker.current);
         userMarker.current = null;
       }
-      if (accuracyCircle.current) {
-        map.removeLayer(accuracyCircle.current);
-        accuracyCircle.current = null;
-      }
       return;
     }
-    const { lat, lng, accuracy } = userLocation;
+    const { lat, lng } = userLocation;
     if (!userMarker.current) {
       const icon = L.divIcon({
         className: 'user-location-wrap',
@@ -242,17 +252,8 @@ export default function LeafletMap({
         iconAnchor: [10, 10],
       });
       userMarker.current = L.marker([lat, lng], { icon, zIndexOffset: 1000 }).addTo(map);
-      accuracyCircle.current = L.circle([lat, lng], {
-        radius: accuracy,
-        color: '#22c55e',
-        weight: 1,
-        fillColor: '#22c55e',
-        fillOpacity: 0.12,
-      }).addTo(map);
     } else {
       userMarker.current.setLatLng([lat, lng]);
-      accuracyCircle.current.setLatLng([lat, lng]);
-      accuracyCircle.current.setRadius(accuracy);
     }
   }, [userLocation, mapRef]);
 
@@ -309,15 +310,10 @@ export default function LeafletMap({
           routeLine.current.setLatLngs(latlngs);
         }
 
-        try {
-          map.fitBounds(L.latLngBounds(latlngs), {
-            padding: [48, 48],
-            maxZoom: 16,
-            animate: true,
-          });
-        } catch {
-          /* ignore invalid bounds */
-        }
+        map.flyTo([userLocation.lat, userLocation.lng], 18, {
+          animate: true,
+          duration: 0.7,
+        });
       })
       .catch((err) => {
         if (err?.name === 'AbortError') return;
@@ -335,6 +331,10 @@ export default function LeafletMap({
         } else {
           routeLine.current.setLatLngs(latlngs);
         }
+        map.flyTo([userLocation.lat, userLocation.lng], 18, {
+          animate: true,
+          duration: 0.7,
+        });
       });
 
     return () => controller.abort();
