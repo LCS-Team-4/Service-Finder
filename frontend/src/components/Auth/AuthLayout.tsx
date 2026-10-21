@@ -1,4 +1,5 @@
 import { ReactNode } from 'react';
+import AuthMap from './AuthMap'
 
 type AuthLayoutProps = {
 	children: ReactNode;
@@ -8,12 +9,13 @@ type AuthLayoutProps = {
 function AuthLayout({ children, label }: Readonly<AuthLayoutProps>) {
 	return (
 		<main className="auth-page">
-			<section className="auth-story" aria-label="ServiceFinder introduction">
-				<div className="story-content">
-					<a className="brand" href="/" aria-label="The Cape Guide home">
-						<span className="brand-mark" aria-hidden="true">
-							<span>⌕</span>
-						</span>
+			<AuthMap />
+				<section className="auth-story" aria-label="ServiceFinder introduction">
+					<div className="story-content">
+						<a className="brand" href="/" aria-label="The Cape Guide home">
+							<span className="brand-mark" aria-hidden="true">
+								<span>⌕</span>
+							</span>
 						<span className="brand-name">
 							THE CAPE <span>GUIDE</span>
 						</span>
