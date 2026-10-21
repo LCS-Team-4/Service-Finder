@@ -149,24 +149,6 @@ export default function Home() {
       .map((place) => place.category)));
   }, [allPlaces, query]);
 
-  const categorySuggestions = useMemo(() => {
-    if (matchingCategoryNames.length === 0) return [];
-    return allPlaces
-      .filter((place) => matchingCategoryNames.includes(place.category))
-      .map((place) => ({
-        place,
-        distanceKm: userLocation
-          ? distanceKm({ lat: place.lat, lng: place.lng }, userLocation)
-          : null,
-      }))
-      .sort((a, b) => {
-        if (a.distanceKm !== null && b.distanceKm !== null) return a.distanceKm - b.distanceKm;
-        if (a.distanceKm !== null) return -1;
-        if (b.distanceKm !== null) return 1;
-        return a.place.name.localeCompare(b.place.name);
-      });
-  }, [allPlaces, matchingCategoryNames, userLocation]);
-
   const requestCurrentLocation = useCallback((): Promise<UserLocation> => {
     if (userLocation) return Promise.resolve(userLocation);
     if (!navigator.geolocation) return Promise.reject(new Error('Geolocation is not supported on this device.'));
@@ -201,7 +183,8 @@ export default function Home() {
   }, [userLocation]);
 
   useEffect(() => {
-    if (matchingCategoryNames.length === 0) {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    if (!normalizedQuery || radiusKm === null) {
       requestedCategoryLocation.current = '';
       setSearchLocationStatus('idle');
       return;
@@ -211,14 +194,47 @@ export default function Home() {
       return;
     }
 
-    const categoryKey = matchingCategoryNames.join('|');
+    const categoryKey = `${normalizedQuery}|${radiusKm}`;
     if (requestedCategoryLocation.current === categoryKey) return;
     requestedCategoryLocation.current = categoryKey;
     setSearchLocationStatus('locating');
     requestCurrentLocation()
       .then(() => setSearchLocationStatus('idle'))
       .catch(() => setSearchLocationStatus('unavailable'));
-  }, [matchingCategoryNames, requestCurrentLocation, userLocation]);
+  }, [query, radiusKm, requestCurrentLocation, userLocation]);
+
+  const searchedPlaces = useMemo(
+    () => allPlaces.filter((place) =>
+      (!active || place.category === active) &&
+      `${place.name} ${place.formatted_address ?? ''} ${place.category}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
+    ),
+    [active, allPlaces, query],
+  );
+
+  const distanceFilteredPlaces = useMemo(() => {
+    if (radiusKm === null) {
+      return searchedPlaces.map((place) => ({
+        place,
+        distanceKm: userLocation
+          ? distanceKm({ lat: place.lat, lng: place.lng }, userLocation)
+          : null,
+      }));
+    }
+    if (!userLocation) return [];
+    return searchedPlaces
+      .map((place) => ({
+        place,
+        distanceKm: distanceKm({ lat: place.lat, lng: place.lng }, userLocation),
+      }))
+      .filter((item) => item.distanceKm <= radiusKm)
+      .sort((a, b) => a.distanceKm - b.distanceKm);
+  }, [radiusKm, searchedPlaces, userLocation]);
+
+  const categorySuggestions = useMemo(() => {
+    if (matchingCategoryNames.length === 0) return [];
+    return distanceFilteredPlaces
+      .filter(({ place }) => matchingCategoryNames.includes(place.category));
+  }, [distanceFilteredPlaces, matchingCategoryNames]);
 
   const visible = useMemo(() => {
     const searched = places.filter((p) =>
@@ -270,29 +286,34 @@ export default function Home() {
   }, []);
 
   const search = async () => {
-    let results = matchingCategoryNames.length > 0
-      ? categorySuggestions
-      : visible.map((place) => ({
-          place,
-          distanceKm: userLocation ? distanceKm({ lat: place.lat, lng: place.lng }, userLocation) : null,
-        }));
-
-    if (matchingCategoryNames.length > 0 && !userLocation) {
+    let currentLocation = userLocation;
+    if (radiusKm !== null && !currentLocation && query.trim()) {
       setSearchLocationStatus('locating');
       try {
-        const location = await requestCurrentLocation();
-        results = allPlaces
-          .filter((place) => matchingCategoryNames.includes(place.category))
-          .map((place) => ({
-            place,
-            distanceKm: distanceKm({ lat: place.lat, lng: place.lng }, location),
-          }))
-          .sort((a, b) => a.distanceKm! - b.distanceKm!);
+        currentLocation = await requestCurrentLocation();
         setSearchLocationStatus('idle');
-      } catch {
+      } catch (error) {
         setSearchLocationStatus('unavailable');
+        setNotice(error instanceof Error ? error.message : 'Unable to get your location to filter nearby services.');
+        return;
       }
     }
+
+    const candidates = matchingCategoryNames.length > 0
+      ? searchedPlaces.filter((place) => matchingCategoryNames.includes(place.category))
+      : searchedPlaces;
+    const results = candidates
+      .map((place) => ({
+        place,
+        distanceKm: currentLocation
+          ? distanceKm({ lat: place.lat, lng: place.lng }, currentLocation)
+          : null,
+      }))
+      .filter(({ distanceKm: distance }) => radiusKm === null || (distance !== null && distance <= radiusKm))
+      .sort((a, b) => {
+        if (a.distanceKm !== null && b.distanceKm !== null) return a.distanceKm - b.distanceKm;
+        return a.place.name.localeCompare(b.place.name);
+      });
 
     const first = results[0]?.place;
     if (first) selectPlace(first);
