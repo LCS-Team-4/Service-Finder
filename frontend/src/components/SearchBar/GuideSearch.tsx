@@ -15,6 +15,8 @@ interface GuideSearchProps {
   tracking: boolean;
   radiusKm: number | null;
   onRadiusChange: (radius: number | null) => void;
+  visibleCount: number;
+  totalCount: number;
 }
 
 const RADIUS_OPTIONS: Array<{ label: string; value: number | null }> = [
@@ -44,6 +46,8 @@ export default function GuideSearch({
   tracking,
   radiusKm,
   onRadiusChange,
+  visibleCount,
+  totalCount,
 }: GuideSearchProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -81,6 +85,10 @@ export default function GuideSearch({
         >
           <LocateFixed size={17} />
         </button>
+
+        <span className="search-result-count">
+          {visibleCount} of {totalCount}
+        </span>
 
         {showSuggestions && (
           <div className="search-results" role="list" aria-label="Services in this category">

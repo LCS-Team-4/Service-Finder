@@ -440,6 +440,8 @@ export default function Home() {
           tracking={tracking}
           radiusKm={radiusKm}
           onRadiusChange={setRadiusKm}
+          visibleCount={visible.length}  // <-- ADD
+          totalCount={allPlaces.length}  // <-- ADD
         />
 
         {loading && <div className="notice">Loading services...</div>}
