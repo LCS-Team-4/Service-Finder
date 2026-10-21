@@ -65,7 +65,7 @@ export default function Home() {
   const { incidents } = useTrafficIncidents();
 
   const [query, setQuery] = useState('');
-  const [active, setActive] = useState<Category | null>(null);
+  const [active, setActive] = useState<Set<Category>>(() => new Set());
   const [selected, setSelected] = useState<Place | null>(null);
   const [notice, setNotice] = useState('');
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -106,6 +106,33 @@ export default function Home() {
       .map((name) => ({ name, color: categoryColor(name) })),
     [allPlaces],
   );
+
+  // Per-category totals within the current radius (denominator in "X of Y").
+  const categoryTotals = useMemo(() => {
+    const totals = new Map<Category, number>();
+    for (const place of allPlaces) {
+      if (userLocation && radiusKm !== null) {
+        if (distanceKm({ lat: place.lat, lng: place.lng }, userLocation) > radiusKm) continue;
+      }
+      totals.set(place.category, (totals.get(place.category) ?? 0) + 1);
+    }
+    return totals;
+  }, [allPlaces, userLocation, radiusKm]);
+
+  // Per-category matches for the current search text (numerator in "X of Y").
+  const categoryMatches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const matches = new Map<Category, number>();
+    for (const place of allPlaces) {
+      if (userLocation && radiusKm !== null) {
+        if (distanceKm({ lat: place.lat, lng: place.lng }, userLocation) > radiusKm) continue;
+      }
+      const haystack = `${place.name} ${place.formatted_address ?? ''} ${place.category}`.toLowerCase();
+      if (q && !haystack.includes(q)) continue;
+      matches.set(place.category, (matches.get(place.category) ?? 0) + 1);
+    }
+    return matches;
+  }, [allPlaces, query, userLocation, radiusKm]);
 
   const matchingCategoryNames = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -195,7 +222,7 @@ export default function Home() {
 
   const visible = useMemo(() => {
     const searched = places.filter((p) =>
-      (!active || p.category === active) &&
+      (active.size === 0 || active.has(p.category)) &&
       `${p.name} ${p.formatted_address ?? ''} ${p.category}`.toLowerCase().includes(query.toLowerCase()),
     );
 
@@ -225,6 +252,16 @@ export default function Home() {
       else next.add(code);
       return next;
     });
+  }, []);
+
+  const toggleCategory = useCallback((category: Category) => {
+    setActive((current) => {
+      const next = new Set(current);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+    setSelected(null);
   }, []);
 
   const selectPlace = useCallback((place: Place) => {
@@ -443,7 +480,7 @@ export default function Home() {
               setRouteTarget(null);
               setSelected(null);
               setQuery('');
-              setActive(null);
+              setActive(new Set());
               setRadiusKm(null);
               mapRef.current?.flyTo([-33.96, 18.5], 11, { animate: true, duration: 0.8 });
               setNotice('Route cleared. Showing all services.');
@@ -511,19 +548,46 @@ export default function Home() {
             </button>
             <h2>Legend</h2>
 
-            {categories.map((item) => (
-              <button
-                key={item.name}
-                className={active === item.name ? 'active' : ''}
-                onClick={() => {
-                  setActive(active === item.name ? null : item.name);
-                  setSelected(null);
-                }}
-              >
-                <i style={{ background: item.color }}><CategoryIcon category={item.name} /></i>
-                {item.name}
-              </button>
-            ))}
+            <div className="legend-summary">
+              <span>
+                Showing <strong>{visible.length}</strong> of <strong>{allPlaces.length}</strong> services
+              </span>
+              {active.size > 0 && (
+                <button
+                  className="legend-clear-filters"
+                  onClick={() => setActive(new Set())}
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+
+            {categories.map((item) => {
+              const isActive = active.has(item.name);
+              const total = categoryTotals.get(item.name) ?? 0;
+              const matched = categoryMatches.get(item.name) ?? 0;
+              const isFiltered = active.size > 0;
+
+              return (
+                <button
+                  key={item.name}
+                  className={isActive ? 'active' : ''}
+                  aria-pressed={isActive}
+                  title={
+                    isActive
+                      ? `Remove ${item.name.toLowerCase()} filter`
+                      : `Filter to ${item.name.toLowerCase()} (${matched} of ${total})`
+                  }
+                  onClick={() => toggleCategory(item.name)}
+                >
+                  <i style={{ background: item.color }}><CategoryIcon category={item.name} /></i>
+                  <span className="legend-label">{item.name}</span>
+                  <span className="legend-count">
+                    {isFiltered && !isActive ? `${matched}/${total}` : `${matched} of ${total}`}
+                  </span>
+                </button>
+              );
+            })}
 
             <h3 className="legend-heading">
               Traffic &amp; road works

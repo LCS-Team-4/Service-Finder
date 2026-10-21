@@ -13,7 +13,7 @@ export async function getServices(req: Request, res: Response, next: NextFunctio
 
 		let query = supabase
 			.from('services')
-			.select('*, category:service_categories(id,name,slug,parent_id,parent:service_categories!service_categories_parent_id_fkey(id,name,slug,parent_id))')
+			.select('*, category:service_categories(id,name,slug,parent_id)')
 			.limit(limit)
 
 		if (type) query = query.eq('category.slug', type)
@@ -22,7 +22,42 @@ export async function getServices(req: Request, res: Response, next: NextFunctio
 		const { data, error } = await query
 		if (error) throw error
 
-		res.json(data ?? [])
+		const rows = data ?? []
+		const byCategoryId = new Map<string, { id: string; name: string; slug: string; parent_id: string | null }>()
+		for (const row of rows) {
+			const cat = (row as any).category
+			if (cat) byCategoryId.set(cat.id, cat)
+		}
+
+		const parentIds = new Set(
+			[...byCategoryId.values()]
+				.map((c) => c.parent_id)
+				.filter((id): id is string => !!id),
+		)
+
+		let parents = new Map<string, { id: string; name: string; slug: string; parent_id: string | null }>()
+		if (parentIds.size > 0) {
+			const { data: parentRows, error: parentError } = await supabase
+				.from('service_categories')
+				.select('id,name,slug,parent_id')
+				.in('id', [...parentIds])
+			if (parentError) throw parentError
+			parents = new Map((parentRows ?? []).map((p) => [p.id, p]))
+		}
+
+		const enriched = rows.map((row: any) => {
+			const cat = row.category
+			if (!cat) return row
+			return {
+				...row,
+				category: {
+					...cat,
+					parent: cat.parent_id ? parents.get(cat.parent_id) ?? null : null,
+				},
+			}
+		})
+
+		res.json(enriched)
 	} catch (error) {
 		next(error)
 	}

@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS public.service_categories (
   id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name        TEXT NOT NULL,
   slug        TEXT NOT NULL UNIQUE,
-  parent_id   UUID REFERENCES public.service_categories(id) ON DELETE SET NULL,
+
+parent_id   UUID CONSTRAINT service_categories_parent_id_fkey REFERENCES public.service_categories(id) ON DELETE SET NULL,,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
