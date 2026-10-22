@@ -68,6 +68,7 @@ interface LeafletMapProps {
   userLocation: { lat: number; lng: number; accuracy: number } | null;
   incidents: TrafficIncident[];
   routeTarget: Place | null;
+  onMapMoving?: (moving: boolean) => void;
 }
 
 export default function LeafletMap({
@@ -79,6 +80,7 @@ export default function LeafletMap({
   userLocation,
   incidents,
   routeTarget,
+  onMapMoving,
 }: LeafletMapProps) {
   const root = useRef<HTMLDivElement>(null);
   const layer = useRef<any>(null);
@@ -183,15 +185,29 @@ export default function LeafletMap({
       renderMarkersInView();
       renderIncidentsInView();
     };
-    map.on('moveend', onMove);
-    map.on('zoomend', onMove);
+
+    const onMoveStart = () => {
+      onMapMoving?.(true);
+    };
+
+    const onMoveEnd = () => {
+      onMapMoving?.(false);
+      onMove(); // Trigger the marker re-render
+    };
+
+    map.on('movestart', onMoveStart);
+    map.on('zoomstart', onMoveStart);
+    map.on('moveend', onMoveEnd);
+    map.on('zoomend', onMoveEnd);
 
     return () => {
-      map.off('moveend', onMove);
-      map.off('zoomend', onMove);
+      map.off('movestart', onMoveStart);
+      map.off('zoomstart', onMoveStart);
+      map.off('moveend', onMoveEnd);
+      map.off('zoomend', onMoveEnd);
       map.remove();
     };
-  }, [mapRef, renderMarkersInView, renderIncidentsInView]);
+  }, [mapRef, renderMarkersInView, renderIncidentsInView, onMapMoving]);
 
   useEffect(() => {
     const map = mapRef.current;

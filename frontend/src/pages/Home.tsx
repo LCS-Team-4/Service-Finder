@@ -64,6 +64,7 @@ export default function Home() {
   const { services, loading, error } = useServices();
   const { incidents } = useTrafficIncidents();
 
+  const [isMapMoving, setIsMapMoving] = useState(false);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState<Set<Category>>(() => new Set());
   const [selected, setSelected] = useState<Place | null>(null);
@@ -420,9 +421,10 @@ export default function Home() {
           userLocation={userLocation}
           incidents={visibleIncidents}
           routeTarget={routeTarget}
+          onMapMoving={setIsMapMoving}
         />
 
-        <header className="masthead">
+        <header className={`masthead ${isMapMoving ? 'is-faded' : ''}`}>
           <h1>The Cape Guide</h1>
           <p>Find. Navigate. Connect.</p>
         </header>

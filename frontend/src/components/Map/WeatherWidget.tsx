@@ -1,12 +1,6 @@
+import { useState } from 'react';
 import {
-  Cloud,
-  CloudDrizzle,
-  CloudFog,
-  CloudLightning,
-  CloudRain,
-  CloudSnow,
-  CloudSun,
-  Sun,
+  Cloud, CloudDrizzle, CloudFog, CloudLightning, CloudRain, CloudSnow, CloudSun, Sun, X,
 } from 'lucide-react';
 import type { CurrentWeather } from '../../hooks/useWeather';
 
@@ -47,33 +41,67 @@ function WeatherIcon({ code }: { code: number }) {
 }
 
 export default function WeatherWidget({ weather, error, now, locationLabel }: WeatherWidgetProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
   return (
-    <aside className="weather-widget" aria-label="Current date, time, and weather">
-      <div className="weather-clock">
-        <span>{now.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}</span>
-        <time>{now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</time>
+    <aside className={`weather-widget-wrapper ${isExpanded ? 'is-expanded' : ''}`}>
+      
+      {/* COLLAPSED PILL */}
+      <div 
+        className="weather-pill" 
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        {weather ? (
+          <>
+            <WeatherIcon code={weather.weatherCode} />
+            <span>{Math.round(weather.temperature)}°C</span>
+          </>
+        ) : (
+          <span className="weather-loading">--°C</span>
+        )}
       </div>
-      <div className="weather-location">{locationLabel} · Today</div>
-      {weather ? (
-        <div className="weather-conditions">
-          <WeatherIcon code={weather.weatherCode} />
-          <div className="weather-current">
-            <strong>{Math.round(weather.temperature)}°C</strong>
-            <span>{getWeatherDescription(weather.weatherCode)}</span>
-          </div>
-          <div className="weather-range">
-            <span>H {Math.round(weather.high)}°</span>
-            <span>L {Math.round(weather.low)}°</span>
-          </div>
-          <div className="weather-details">
-            Feels {Math.round(weather.feelsLike)}° · Wind {Math.round(weather.windSpeed)} km/h
-          </div>
+
+      {/* EXPANDED CARD */}
+      <div className="weather-card">
+        <button 
+          className="weather-close" 
+          onClick={(e) => { 
+            e.preventDefault();
+            e.stopPropagation(); 
+            setIsExpanded(false); 
+          }}
+          aria-label="Close weather"
+        >
+          <X size={16} />
+        </button>
+
+        <div className="weather-clock">
+          <span>{now.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+          <time>{now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</time>
         </div>
-      ) : (
-        <p className={error ? 'weather-message error' : 'weather-message'}>
-          {error ? 'Weather unavailable right now.' : 'Loading today’s weather...'}
-        </p>
-      )}
+        <div className="weather-location">{locationLabel} · Today</div>
+        
+        {weather ? (
+          <div className="weather-conditions">
+            <WeatherIcon code={weather.weatherCode} />
+            <div className="weather-current">
+              <strong>{Math.round(weather.temperature)}°C</strong>
+              <span>{getWeatherDescription(weather.weatherCode)}</span>
+            </div>
+            <div className="weather-range">
+              <span>H {Math.round(weather.high)}°</span>
+              <span>L {Math.round(weather.low)}°</span>
+            </div>
+            <div className="weather-details">
+              Feels {Math.round(weather.feelsLike)}° · Wind {Math.round(weather.windSpeed)} km/h
+            </div>
+          </div>
+        ) : (
+          <p className={error ? 'weather-message error' : 'weather-message'}>
+            {error ? 'Weather unavailable right now.' : 'Loading today’s weather...'}
+          </p>
+        )}
+      </div>
     </aside>
   );
 }
