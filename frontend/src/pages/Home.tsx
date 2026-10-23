@@ -246,6 +246,15 @@ export default function Home() {
     [incidents, hiddenIncidents],
   );
 
+  // Right below your other useMemo hooks
+const routeDistance = useMemo(() => {
+  if (!userLocation || !routeTarget) return null;
+  return distanceKm(
+    { lat: userLocation.lat, lng: userLocation.lng },
+    { lat: routeTarget.lat, lng: routeTarget.lng }
+  ).toFixed(1); // 1 decimal place (e.g. "4.2")
+}, [userLocation, routeTarget]);
+
   const toggleIncident = useCallback((code: number | null) => {
     setHiddenIncidents((current) => {
       const next = new Set(current);
@@ -409,8 +418,8 @@ export default function Home() {
 
   const showMobilePrompt = isMobile && !userLocation && !loading;
 
-  return (
-    <main className="guide-shell">
+    return (
+    <main className={`guide-shell ${routeTarget ? 'is-routing' : ''}`}>
       <div className="map-stage">
         <LeafletMap
           places={routeTarget ? [routeTarget] : visible}
@@ -471,25 +480,33 @@ export default function Home() {
         )}
 
         {routeTarget && (
-          <button
-            className="clear-route"
-            onClick={() => {
-              if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
-              watchId.current = null;
-              hasCentered.current = false;
-              setTracking(false);
-              setUserLocation(null);
-              setRouteTarget(null);
-              setSelected(null);
-              setQuery('');
-              setActive(new Set());
-              setRadiusKm(null);
-              mapRef.current?.flyTo([-33.96, 18.5], 11, { animate: true, duration: 0.8 });
-              setNotice('Route cleared. Showing all services.');
-            }}
-          >
-            Clear route
-          </button>
+          <div className="route-actions-wrapper">
+            <button
+              className="clear-route"
+              onClick={() => {
+                if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
+                watchId.current = null;
+                hasCentered.current = false;
+                setTracking(false);
+                setUserLocation(null);
+                setRouteTarget(null);
+                setSelected(null);
+                setQuery('');
+                setActive(new Set());
+                setRadiusKm(null);
+                mapRef.current?.flyTo([-33.96, 18.5], 11, { animate: true, duration: 0.8 });
+                setNotice('Route cleared. Showing all services.');
+              }}
+            >
+              Clear route
+            </button>
+            
+            {routeDistance && (
+              <div className="route-distance">
+                {routeDistance} km away
+              </div>
+            )}
+          </div>
         )}
 
         <WeatherWidget
@@ -506,7 +523,7 @@ export default function Home() {
           onClick={() => setSatellite((current) => !current)}
         >
           <Layers size={16} />
-          {satellite ? 'Street map' : 'Satellite'}
+          <span>{satellite ? 'Street map' : 'Satellite'}</span>
         </button>
 
         <button
@@ -633,7 +650,7 @@ export default function Home() {
           </aside>
         )}
 
-        <div className="leaflet-zoom">
+        <div className="leaflet-zoom" style={{ display: isMobile ? 'none' : 'grid' }}>
           <button aria-label="Zoom in" onClick={() => mapRef.current?.zoomIn()}><Plus size={18} /></button>
           <button aria-label="Zoom out" onClick={() => mapRef.current?.zoomOut()}><Minus size={18} /></button>
         </div>
