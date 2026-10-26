@@ -161,3 +161,16 @@ export async function resetPassword(req: Request, res: Response) {
 
 	return res.json({ message: 'Password updated successfully.' })
 }
+
+export async function me(req: Request, res: Response) {
+  // The authenticateToken middleware has already populated req.auth
+  const authReq = req as Request & { auth?: { userId: string; email?: string; role?: string } }
+  if (!authReq.auth) {
+    return res.status(401).json({ error: 'Unauthorized' })
+  }
+  return res.json({
+    id: authReq.auth.userId,
+    email: authReq.auth.email,
+    role: authReq.auth.role ?? 'user',
+  })
+}
