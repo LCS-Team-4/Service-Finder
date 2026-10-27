@@ -90,3 +90,20 @@ export function getServiceDetails(externalId: string) {
 export function getTrafficIncidents() {
   return request<TrafficIncident[]>('/traffic-incidents', { method: 'GET' });
 }
+
+export type MeResponse = {
+  id: string;
+  email?: string;
+  role: 'admin' | 'user';
+};
+
+export function getMe() {
+  const token = localStorage.getItem('servicefinder_access_token');
+  if (!token) {
+    return Promise.reject(new Error('No access token'));
+  }
+  return request<MeResponse>('/auth/me', {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
