@@ -1,6 +1,14 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import {
-  Cloud, CloudDrizzle, CloudFog, CloudLightning, CloudRain, CloudSnow, CloudSun, Sun, X,
+  Cloud,
+  CloudDrizzle,
+  CloudFog,
+  CloudLightning,
+  CloudRain,
+  CloudSnow,
+  CloudSun,
+  Sun,
+  X,
 } from 'lucide-react';
 import type { CurrentWeather } from '../../hooks/useWeather';
 
@@ -40,15 +48,13 @@ function WeatherIcon({ code }: { code: number }) {
   return <CloudSun aria-hidden="true" />;
 }
 
-export default function WeatherWidget({ weather, error, now, locationLabel }: WeatherWidgetProps) {
+function WeatherWidget({ weather, error, now, locationLabel }: WeatherWidgetProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
     <aside className={`weather-widget-wrapper ${isExpanded ? 'is-expanded' : ''}`}>
-      
-      {/* COLLAPSED PILL */}
-      <div 
-        className="weather-pill" 
+      <div
+        className="weather-pill"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         {weather ? (
@@ -61,14 +67,13 @@ export default function WeatherWidget({ weather, error, now, locationLabel }: We
         )}
       </div>
 
-      {/* EXPANDED CARD */}
       <div className="weather-card">
-        <button 
-          className="weather-close" 
-          onClick={(e) => { 
+        <button
+          className="weather-close"
+          onClick={(e) => {
             e.preventDefault();
-            e.stopPropagation(); 
-            setIsExpanded(false); 
+            e.stopPropagation();
+            setIsExpanded(false);
           }}
           aria-label="Close weather"
         >
@@ -80,7 +85,7 @@ export default function WeatherWidget({ weather, error, now, locationLabel }: We
           <time>{now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</time>
         </div>
         <div className="weather-location">{locationLabel} · Today</div>
-        
+
         {weather ? (
           <div className="weather-conditions">
             <WeatherIcon code={weather.weatherCode} />
@@ -105,3 +110,5 @@ export default function WeatherWidget({ weather, error, now, locationLabel }: We
     </aside>
   );
 }
+
+export default memo(WeatherWidget);

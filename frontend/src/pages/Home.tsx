@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, Layers, MapPinned, Minus, Plus, X, LocateFixed } from 'lucide-react';
 import LeafletMap, { parseIncidentGeometry } from '../components/Map/LeafletMap';
 import WeatherWidget from '../components/Map/WeatherWidget';
@@ -48,16 +48,26 @@ const getCoordinates = (location: Service['location']): [number, number] | null 
   ];
 };
 
+// PERF: cache Place objects by service ID so the geometry parser doesn't rerun
+// for every row whenever Dexie emits a fresh `services` array (e.g. on refresh).
+const placeCache = new Map<string, Place | null>();
+
 const toPlace = (service: Service): Place | null => {
+  if (placeCache.has(service.id)) return placeCache.get(service.id) ?? null;
   const coordinates = getCoordinates(service.location);
-  if (!coordinates || coordinates.some((coordinate) => !Number.isFinite(coordinate))) return null;
-  return {
+  if (!coordinates || coordinates.some((coordinate) => !Number.isFinite(coordinate))) {
+    placeCache.set(service.id, null);
+    return null;
+  }
+  const place: Place = {
     ...service,
     category: service.category?.name ?? service.type ?? 'Service',
     parentCategory: service.category?.parent?.name ?? null,
     lat: coordinates[1],
     lng: coordinates[0],
   };
+  placeCache.set(service.id, place);
+  return place;
 };
 
 export default function Home() {
@@ -66,6 +76,8 @@ export default function Home() {
 
   const [isMapMoving, setIsMapMoving] = useState(false);
   const [query, setQuery] = useState('');
+  // PERF: keep the input snappy while the heavy memos filter at low priority.
+  const deferredQuery = useDeferredValue(query);
   const [active, setActive] = useState<Set<Category>>(() => new Set());
   const [selected, setSelected] = useState<Place | null>(null);
   const [notice, setNotice] = useState('');
@@ -122,7 +134,7 @@ export default function Home() {
 
   // Per-category matches for the current search text (numerator in "X of Y").
   const categoryMatches = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = deferredQuery.trim().toLowerCase();
     const matches = new Map<Category, number>();
     for (const place of allPlaces) {
       if (userLocation && radiusKm !== null) {
@@ -133,10 +145,10 @@ export default function Home() {
       matches.set(place.category, (matches.get(place.category) ?? 0) + 1);
     }
     return matches;
-  }, [allPlaces, query, userLocation, radiusKm]);
+  }, [allPlaces, deferredQuery, userLocation, radiusKm]);
 
   const matchingCategoryNames = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
+    const normalizedQuery = deferredQuery.trim().toLocaleLowerCase();
     if (!normalizedQuery) return [];
     return Array.from(new Set(allPlaces
       .filter((place) => {
@@ -148,7 +160,7 @@ export default function Home() {
           || (parent && normalizedQuery.includes(parent));
       })
       .map((place) => place.category)));
-  }, [allPlaces, query]);
+  }, [allPlaces, deferredQuery]);
 
   const categorySuggestions = useMemo(() => {
     if (matchingCategoryNames.length === 0) return [];
@@ -222,9 +234,10 @@ export default function Home() {
   }, [matchingCategoryNames, requestCurrentLocation, userLocation]);
 
   const visible = useMemo(() => {
-    const searched = places.filter((p) =>
-      (active.size === 0 || active.has(p.category)) &&
-      `${p.name} ${p.formatted_address ?? ''} ${p.category}`.toLowerCase().includes(query.toLowerCase()),
+    const q = deferredQuery.toLowerCase();
+    const searched = places.filter((place) =>
+      (active.size === 0 || active.has(place.category)) &&
+      `${place.name} ${place.formatted_address ?? ''} ${place.category}`.toLowerCase().includes(q),
     );
 
     if (!userLocation || radiusKm === null) return searched;
@@ -232,7 +245,7 @@ export default function Home() {
     return searched.filter(
       (place) => distanceKm({ lat: place.lat, lng: place.lng }, userLocation) <= radiusKm,
     );
-  }, [active, places, query, userLocation, radiusKm]);
+  }, [active, places, deferredQuery, userLocation, radiusKm]);
 
   const incidentLegend = useMemo(
     () => buildIncidentLegend(incidents),
@@ -300,7 +313,7 @@ export default function Home() {
     setNotice(first ? `${results.length} place${results.length === 1 ? '' : 's'} found` : 'No places found');
   };
 
-  const getDirections = async (place: Place) => {
+  const getDirections = useCallback(async (place: Place) => {
     let origin = userLocation;
     if (!origin) {
       setNotice('Getting your current location for directions...');
@@ -316,7 +329,7 @@ export default function Home() {
     setSelected(null);
     setRouteTarget(place);
     setNotice(`Getting road directions to ${place.name}...`);
-  };
+  }, [userLocation, requestCurrentLocation]);
 
   const selectSuggestion = (place: Place) => {
     setQuery(place.name);
@@ -407,6 +420,25 @@ export default function Home() {
     [],
   );
 
+  // PERF: stable callbacks so memo() on ServicePopup actually prevents re-renders.
+  const handleClosePopup = useCallback(() => {
+    setSelected(null);
+    setRouteTarget(null);
+  }, []);
+
+  const handleSaveSelected = useCallback(() => {
+    if (!selected) return;
+    setSaved((current) =>
+      current.includes(selected.name)
+        ? current.filter((n) => n !== selected.name)
+        : [...current, selected.name],
+    );
+  }, [selected]);
+
+  const handleDirectionsForSelected = useCallback(() => {
+    if (selected) void getDirections(selected);
+  }, [getDirections, selected]);
+
   const showMobilePrompt = isMobile && !userLocation && !loading;
 
   return (
@@ -461,12 +493,9 @@ export default function Home() {
           <ServicePopup
             place={selected}
             saved={saved.includes(selected.name)}
-            onClose={() => {
-              setSelected(null);
-              setRouteTarget(null);
-            }}
-            onSave={() => toggleSave(selected.name)}
-            onGetDirections={() => getDirections(selected)}
+            onClose={handleClosePopup}
+            onSave={handleSaveSelected}
+            onGetDirections={handleDirectionsForSelected}
           />
         )}
 

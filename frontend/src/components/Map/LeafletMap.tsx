@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { memo, useCallback, useEffect, useRef } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { CarFront, Construction } from 'lucide-react';
 import { CategoryIcon } from '../common/CategoryIcon';
@@ -71,7 +71,7 @@ interface LeafletMapProps {
   onMapMoving?: (moving: boolean) => void;
 }
 
-export default function LeafletMap({
+function LeafletMap({
   places,
   selected,
   onSelect,
@@ -90,24 +90,23 @@ export default function LeafletMap({
   const routeLine = useRef<any>(null);
   const lastRouteKey = useRef<string>('');
 
-  // Keep the latest data in refs so the map-event callback can read it
-  // without re-registering listeners on every data change.
   const placesRef = useRef<Place[]>([]);
   const incidentsRef = useRef<TrafficIncident[]>([]);
   const onSelectRef = useRef(onSelect);
   const selectedRef = useRef<Place | null>(selected);
+  const onMapMovingRef = useRef(onMapMoving);
 
   placesRef.current = places;
   incidentsRef.current = incidents;
   onSelectRef.current = onSelect;
   selectedRef.current = selected;
+  onMapMovingRef.current = onMapMoving;
 
   const renderMarkersInView = useCallback(() => {
     const map = mapRef.current;
     if (!map || !layer.current) return;
 
     const bounds = map.getBounds();
-    const currentSelected = selectedRef.current;
 
     layer.current.clearLayers();
 
@@ -179,20 +178,20 @@ export default function LeafletMap({
     mapRef.current = map;
     layer.current = L.layerGroup().addTo(map);
     incidentLayer.current = L.layerGroup().addTo(map);
-    setTimeout(() => map.invalidateSize(), 0);
+
+    // PERF: ResizeObserver keeps the map in sync with its container size,
+    // replacing the fragile `setTimeout(invalidateSize, 0)`.
+    const ro = new ResizeObserver(() => map.invalidateSize());
+    if (root.current) ro.observe(root.current);
 
     const onMove = () => {
       renderMarkersInView();
       renderIncidentsInView();
     };
-
-    const onMoveStart = () => {
-      onMapMoving?.(true);
-    };
-
+    const onMoveStart = () => onMapMovingRef.current?.(true);
     const onMoveEnd = () => {
-      onMapMoving?.(false);
-      onMove(); // Trigger the marker re-render
+      onMapMovingRef.current?.(false);
+      onMove();
     };
 
     map.on('movestart', onMoveStart);
@@ -201,13 +200,14 @@ export default function LeafletMap({
     map.on('zoomend', onMoveEnd);
 
     return () => {
+      ro.disconnect();
       map.off('movestart', onMoveStart);
       map.off('zoomstart', onMoveStart);
       map.off('moveend', onMoveEnd);
       map.off('zoomend', onMoveEnd);
       map.remove();
     };
-  }, [mapRef, renderMarkersInView, renderIncidentsInView, onMapMoving]);
+  }, [mapRef, renderMarkersInView, renderIncidentsInView]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -227,16 +227,17 @@ export default function LeafletMap({
   }, [mapRef, satellite]);
 
   // 2. Re-render when the data changes
+  // PERF: `selected` deliberately removed — clicking a marker no longer rebuilds
+  // the entire layer. Selection is handled by the popup, not by the markers.
   useEffect(() => {
     renderMarkersInView();
-  }, [places, selected, renderMarkersInView]);
+  }, [places, renderMarkersInView]);
 
   useEffect(() => {
     renderIncidentsInView();
   }, [incidents, renderIncidentsInView]);
 
-  // 3. When the user location first arrives, jump to it and let the marker
-  //    layer repopulate around their position.
+  // 3. Center on user once
   const hasCenteredOnUser = useRef(false);
   useEffect(() => {
     if (!userLocation || !mapRef.current) return;
@@ -358,3 +359,5 @@ export default function LeafletMap({
 
   return <div className="leaflet-map" ref={root} />;
 }
+
+export default memo(LeafletMap);

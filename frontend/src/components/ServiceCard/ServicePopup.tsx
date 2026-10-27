@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { Bookmark, Clock3, MapPinned, Navigation, Phone, X, Globe, Accessibility } from 'lucide-react';
 import { CategoryIcon } from '../common/CategoryIcon';
 import { categoryColor } from '../../utils/constants';
@@ -12,7 +12,7 @@ interface ServicePopupProps {
   onGetDirections: () => void;
 }
 
-export default function ServicePopup({
+function ServicePopup({
   place,
   saved,
   onClose,
@@ -79,3 +79,5 @@ export default function ServicePopup({
     </section>
   );
 }
+
+export default memo(ServicePopup);
