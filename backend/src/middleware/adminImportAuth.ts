@@ -1,12 +1,13 @@
 import { NextFunction, Request, Response } from 'express'
-export function requireAdminImportToken(req: Request, res: Response, next: NextFunction) {
-  const expectedToken = process.env.ADMIN_IMPORT_TOKEN
-  const receivedToken = req.header('x-admin-import-token')
+import { authenticateToken, requireAdmin, type AuthRequest } from './auth'
 
-  if (!expectedToken || receivedToken !== expectedToken) {
-    res.status(401).json({ error: 'Unauthorized' })
-    return
-  }
-
-  next()
+// Chain the standard JWT check and the admin role check.
+// This means we only need the user's standard Authorization header.
+export function requireAdminJwt(req: AuthRequest, res: Response, next: NextFunction) {
+  authenticateToken(req, res, (err) => {
+    if (err) return next(err);
+    
+    // After authenticateToken runs, req.auth is populated
+    requireAdmin(req, res, next);
+  });
 }

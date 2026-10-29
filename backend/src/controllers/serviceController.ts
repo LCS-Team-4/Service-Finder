@@ -100,6 +100,7 @@ export const updateService = async (req: Request, res: Response, next: NextFunct
 			phone,
 			wheelchair,
 			sourcename,
+			status,
 		} = req.body
 
 		const updates = Object.fromEntries(
@@ -113,6 +114,7 @@ export const updateService = async (req: Request, res: Response, next: NextFunct
 				phone,
 				wheelchair,
 				sourcename,
+				status,
 			}).filter(([, value]) => value !== undefined),
 		)
 
@@ -127,4 +129,29 @@ export const updateService = async (req: Request, res: Response, next: NextFunct
 	} catch (error) {
 		next(error)
 	}
+}
+
+// Fetch services by status (admin only use case)
+export async function getServicesByStatus(req: Request, res: Response, next: NextFunction) {
+  try {
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined
+    const limit = Math.min(Math.max(Number(req.query.limit ?? 50), 1), 200)
+
+    let query = supabase
+      .from('services')
+      .select('*, category:service_categories(id,name,slug,parent_id)')
+      .limit(limit)
+      .order('created_at', { ascending: false })
+
+    if (status) {
+      query = query.eq('status', status)
+    }
+
+    const { data, error } = await query
+    if (error) throw error
+
+    res.json(data ?? [])
+  } catch (error) {
+    next(error)
+  }
 }

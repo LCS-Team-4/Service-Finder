@@ -1,12 +1,12 @@
 import { Router } from 'express'
 import { importServices } from '../api/geoapify/client'
 import { importTrafficIncidents } from '../api/tomtom/client'
-import { requireAdminImportToken } from '../middleware/adminImportAuth'
+import { requireAdminJwt } from '../middleware/adminImportAuth'
 import { backfillServiceCategories } from '../services/categoryService'
 
 const router = Router()
 
-router.post('/import/services', requireAdminImportToken, async (_req, res, next) => {
+router.post('/import/services', requireAdminJwt, async (_req, res, next) => {
   try {
     const result = await importServices()
     res.json(result)
@@ -14,10 +14,9 @@ router.post('/import/services', requireAdminImportToken, async (_req, res, next)
     console.error('IMPORT ERROR:', error)
     next(error)
   }
-  
 })
 
-router.post('/import/accidents', requireAdminImportToken, async (_req, res, next) => {
+router.post('/import/accidents', requireAdminJwt, async (_req, res, next) => {
   try {
     const result = await importTrafficIncidents()
     res.json(result)
@@ -27,7 +26,7 @@ router.post('/import/accidents', requireAdminImportToken, async (_req, res, next
   }
 })
 
-router.post('/sync/service-categories', requireAdminImportToken, async (_req, res, next) => {
+router.post('/sync/service-categories', requireAdminJwt, async (_req, res, next) => {
   try {
     const updated = await backfillServiceCategories()
     res.json({ updated })
