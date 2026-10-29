@@ -62,8 +62,6 @@ const toPlace = (service: Service): Place | null => {
 
 export default function Home() {
   const { services, loading, error } = useServices();
-  const { incidents } = useTrafficIncidents();
-
   const [isMapMoving, setIsMapMoving] = useState(false);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState<Set<Category>>(() => new Set());
@@ -73,6 +71,7 @@ export default function Home() {
   const [legendOpen, setLegendOpen] = useState(false);
   const [saved, setSaved] = useState<string[]>([]);
   const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
+  const { incidents } = useTrafficIncidents(Boolean(userLocation));
   const [tracking, setTracking] = useState(false);
   const [satellite, setSatellite] = useState(false);
   const [routeTarget, setRouteTarget] = useState<Place | null>(null);
@@ -239,12 +238,32 @@ export default function Home() {
     [incidents],
   );
 
-  const visibleIncidents = useMemo(
-    () => incidents.filter(
-      (incident) => !hiddenIncidents.has(incident.icon_category ?? null),
-    ),
-    [incidents, hiddenIncidents],
-  );
+const visibleIncidents = useMemo(
+  () => incidents.filter((incident) => {
+    // 1. Hide if the legend toggle is off for this category
+    if (hiddenIncidents.has(incident.icon_category ?? null)) {
+      return false;
+    }
+
+    // 2. If no user location or radius, show everything (current behavior)
+    if (!userLocation || radiusKm === null) {
+      return true;
+    }
+
+    // 3. Otherwise, only show incidents whose midpoint is within the radius
+    const coordinates = parseIncidentGeometry(incident.geometry);
+    if (coordinates.length === 0) return false;
+
+    const [lng, lat] = coordinates[Math.floor(coordinates.length / 2)];
+    const distance = distanceKm(
+      { lat, lng },
+      { lat: userLocation.lat, lng: userLocation.lng },
+    );
+
+    return distance <= radiusKm;
+  }),
+  [incidents, hiddenIncidents, userLocation, radiusKm],
+);
 
   // Right below your other useMemo hooks
 const routeDistance = useMemo(() => {
