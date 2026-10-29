@@ -15,6 +15,7 @@ export async function authenticateToken(
 	next: NextFunction,
 ) {
 	const header = req.headers.authorization
+	console.log('[auth] header =', header?.slice(0, 60))
 	const token = header?.startsWith('Bearer ')
 		? header.slice('Bearer '.length).trim()
 		: undefined

@@ -107,3 +107,59 @@ export function getMe() {
     headers: { Authorization: `Bearer ${token}` },
   });
 }
+
+// =========================================
+// ADMIN
+// =========================================
+export type AdminService = {
+  id: string;
+  name: string;
+  formatted_address: string | null;
+  status: string;
+  location: any;
+  type: string | null;
+};
+
+export function getServicesByStatus(status: string) {
+  const token = localStorage.getItem('servicefinder_access_token');
+  if (!token) return Promise.reject(new Error('No token'));
+  
+  return request<AdminService[]>(`/services/by-status?status=${status}`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function updateServiceStatus(id: string, status: 'approved' | 'rejected' | 'pending') {
+  const token = localStorage.getItem('servicefinder_access_token');
+  if (!token) return Promise.reject(new Error('No token'));
+
+  return request<{ data: AdminService }>(`/services/${id}`, {
+    method: 'PATCH',
+    headers: { 
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}` 
+    },
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function triggerServiceImport() {
+  const token = localStorage.getItem('servicefinder_access_token');
+  if (!token) return Promise.reject(new Error('No token'));
+  
+  return request<{ imported: number; skipped: boolean }>('/admin/import/services', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function triggerTrafficImport() {
+  const token = localStorage.getItem('servicefinder_access_token');
+  if (!token) return Promise.reject(new Error('No token'));
+  
+  return request<{ imported: number; skipped: boolean }>('/admin/import/accidents', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
