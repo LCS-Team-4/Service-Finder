@@ -4,6 +4,7 @@ import LeafletMap, { parseIncidentGeometry } from '../components/Map/LeafletMap'
 import WeatherWidget from '../components/Map/WeatherWidget';
 import GuideSearch from '../components/SearchBar/GuideSearch';
 import ServicePopup from '../components/ServiceCard/ServicePopup';
+import SuggestServiceModal from '../components/ServiceCard/SuggestServiceModal';
 import { CategoryIcon } from '../components/common/CategoryIcon';
 import { IncidentIcon } from '../components/common/IncidentIcon';
 import { useServices } from '../hooks/useServices';

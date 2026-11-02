@@ -40,6 +40,14 @@ async function request<T>(path: string, options: RequestInit): Promise<T> {
   return payload;
 }
 
+function authHeaders(): Record<string, string> {
+  const token = localStorage.getItem('servicefinder_access_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+// =========================================
+// AUTH
+// =========================================
 export type AuthResponse = {
   user: { id: string; email?: string };
   session?: { access_token: string; refresh_token: string };
@@ -74,6 +82,24 @@ export function resetPasswordRequest(accessToken: string, password: string) {
   });
 }
 
+export type MeResponse = {
+  id: string;
+  email?: string;
+  role: 'admin' | 'user';
+};
+
+export function getMe() {
+  const token = localStorage.getItem('servicefinder_access_token');
+  if (!token) return Promise.reject(new Error('No access token'));
+  return request<MeResponse>('/auth/me', {
+    method: 'GET',
+    headers: authHeaders(),
+  });
+}
+
+// =========================================
+// SERVICES (public)
+// =========================================
 export function getServices(params?: { type?: string; q?: string; limit?: number }) {
   const search = new URLSearchParams();
   if (params?.type) search.set('type', params.type);
@@ -91,20 +117,25 @@ export function getTrafficIncidents() {
   return request<TrafficIncident[]>('/traffic-incidents', { method: 'GET' });
 }
 
-export type MeResponse = {
-  id: string;
-  email?: string;
-  role: 'admin' | 'user';
-};
-
-export function getMe() {
+// =========================================
+// SUGGESTIONS (authenticated user)
+// =========================================
+export function suggestService(payload: {
+  name: string;
+  type?: string;
+  formatted_address?: string;
+  phone?: string;
+  website?: string;
+  opening_hours?: string;
+  latitude?: number;
+  longitude?: number;
+}) {
   const token = localStorage.getItem('servicefinder_access_token');
-  if (!token) {
-    return Promise.reject(new Error('No access token'));
-  }
-  return request<MeResponse>('/auth/me', {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${token}` },
+  if (!token) return Promise.reject(new Error('You must be logged in to suggest a service.'));
+  return request<{ data: Service }>('/services/suggest', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(payload),
   });
 }
 
@@ -118,48 +149,74 @@ export type AdminService = {
   status: string;
   location: any;
   type: string | null;
+  submitted_by: string | null;
+  created_at: string;
+  review_note: string | null;
+  phone: string | null;
+  website: string | null;
+  opening_hours: string | null;
 };
 
 export function getServicesByStatus(status: string) {
   const token = localStorage.getItem('servicefinder_access_token');
   if (!token) return Promise.reject(new Error('No token'));
-  
   return request<AdminService[]>(`/services/by-status?status=${status}`, {
     method: 'GET',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: authHeaders(),
   });
 }
 
+/** Update a service's status (approve/reject/pending). */
 export function updateServiceStatus(id: string, status: 'approved' | 'rejected' | 'pending') {
   const token = localStorage.getItem('servicefinder_access_token');
   if (!token) return Promise.reject(new Error('No token'));
-
   return request<{ data: AdminService }>(`/services/${id}`, {
     method: 'PATCH',
-    headers: { 
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}` 
-    },
+    headers: authHeaders(),
     body: JSON.stringify({ status }),
   });
 }
 
+/** Update arbitrary fields on a service (used by marker edit mode). */
+export function updateServiceFields(
+  id: string,
+  payload: {
+    name?: string;
+    type?: string;
+    formatted_address?: string;
+    location?: string;
+    opening_hours?: string | null;
+    phone?: string | null;
+    website?: string | null;
+    wheelchair?: string | null;
+  },
+) {
+  const token = localStorage.getItem('servicefinder_access_token');
+  if (!token) return Promise.reject(new Error('No token'));
+  return request<{ data: AdminService }>(`/services/${id}`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify(payload),
+  });
+}
+
+// =========================================
+// ADMIN IMPORTS
+// =========================================
 export function triggerServiceImport() {
   const token = localStorage.getItem('servicefinder_access_token');
   if (!token) return Promise.reject(new Error('No token'));
-  
   return request<{ imported: number; skipped: boolean }>('/admin/import/services', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: authHeaders(),
   });
 }
 
 export function triggerTrafficImport() {
   const token = localStorage.getItem('servicefinder_access_token');
   if (!token) return Promise.reject(new Error('No token'));
-  
   return request<{ imported: number; skipped: boolean }>('/admin/import/accidents', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: authHeaders(),
   });
 }
