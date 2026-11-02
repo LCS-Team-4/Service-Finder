@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from 'express'
 import { supabase } from '../config/supabase'
 import { fetchServiceDetails, fetchServicesInRadius, updateServiceDetails, findServiceById } from '../models/Service'
+import type { AuthRequest } from '../middleware/auth'
 
 export async function getServices(req: Request, res: Response, next: NextFunction) {
 	try {
@@ -14,6 +15,7 @@ export async function getServices(req: Request, res: Response, next: NextFunctio
 		let query = supabase
 			.from('services')
 			.select('*, category:service_categories(id,name,slug,parent_id)')
+			.eq('status', 'approved')
 			.limit(limit)
 
 		if (type) query = query.eq('category.slug', type)
@@ -80,7 +82,7 @@ export async function getServiceDetails(req: Request, res: Response, next: NextF
 }
 
 //update service details 
-export const updateService = async (req: Request, res: Response, next: NextFunction) => {
+export const updateService = async (req: AuthRequest, res: Response, next: NextFunction) => {
 	const id = req.params.id?.trim()
 	if (!id) return res.status(400).json({ message: 'Service id is required' })
 
@@ -103,7 +105,7 @@ export const updateService = async (req: Request, res: Response, next: NextFunct
 			status,
 		} = req.body
 
-		const updates = Object.fromEntries(
+		const updates: Record<string, any> = Object.fromEntries(
 			Object.entries({
 				name,
 				type,
@@ -120,6 +122,12 @@ export const updateService = async (req: Request, res: Response, next: NextFunct
 
 		if (Object.keys(updates).length === 0) {
 			return res.status(400).json({ message: 'At least one service field is required' })
+		}
+
+        // Explicitly assign the new properties without casting inline
+		if (status && req.auth?.userId) {
+			updates.reviewed_by = req.auth.userId;
+			updates.review_note = status === 'approved' ? 'Approved by admin' : 'Rejected by admin';
 		}
 
 		const { data, error } = await updateServiceDetails(id, updates)
@@ -150,7 +158,13 @@ export async function getServicesByStatus(req: Request, res: Response, next: Nex
     const { data, error } = await query
     if (error) throw error
 
-    res.json(data ?? [])
+    // NEW: Ensure the `type` field is populated so the Admin Map can color the pins correctly
+    const enriched = (data ?? []).map((row: any) => ({
+      ...row,
+      type: row.category?.name ?? row.type ?? 'Service',
+    }))
+
+    res.json(enriched)
   } catch (error) {
     next(error)
   }

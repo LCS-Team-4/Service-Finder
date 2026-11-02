@@ -70,6 +70,9 @@ export async function updateServiceDetails(
         phone?: string | null
         wheelchair?: string | null
         sourcename?: string | null
+        status?: string
+        review_note?: string | null
+        reviewed_by?: string | null
     }
 ){
     const { data, error } = await supabase

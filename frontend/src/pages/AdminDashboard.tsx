@@ -43,11 +43,14 @@ export default function AdminDashboard() {
   const [loadingPending, setLoadingPending] = useState(false);
 
   // Map State
+   // Map State
   const mapRef = useRef<any>(null);
-  const { incidents } = useTrafficIncidents();
+  const [userLocation] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
+  
+  const { incidents } = useTrafficIncidents(Boolean(userLocation));
+  
   const [places, setPlaces] = useState<Place[]>([]);
   const [selected, setSelected] = useState<Place | null>(null);
-  const [userLocation] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
   const [routeTarget] = useState<Place | null>(null);
 
   useEffect(() => {
