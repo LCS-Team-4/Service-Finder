@@ -10,11 +10,9 @@ export function useTrafficIncidents(enabled: boolean) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    // Nothing loads until the caller says location is confirmed
+    // 🛑 THE HARD GATE: If not enabled, do absolutely nothing.
+    // Do not fetch, do not set loading, do not start the timer.
     if (!enabled) {
-      setIncidents([]);
-      setError('');
-      setLoading(false);
       return;
     }
 
@@ -39,7 +37,9 @@ export function useTrafficIncidents(enabled: boolean) {
         });
     };
 
-    load();
+    // Fetch immediately ONLY because we passed the gate above
+    load(); 
+    
     const timer = setInterval(load, POLL_MS);
 
     return () => {
