@@ -2,9 +2,8 @@ import { db } from './index';
 import { getServices } from '../services/api';
 import type { Service } from '../types/service.types';
 
-const CACHE_TTL_MS = 6 *60 * 60 * 1000;
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
-// Debug log we can surface on screen
 const debugLog: string[] = [];
 export function getCacheDebugLog() { return debugLog.join('\n'); }
 function log(line: string) {
@@ -20,24 +19,33 @@ async function isCacheStale(): Promise<boolean> {
   return age > CACHE_TTL_MS;
 }
 
-export async function refreshServicesIfStale(): Promise<boolean> {
-  log('refreshServicesIfStale called');
-  if (!(await isCacheStale())) { log('cache fresh, skipping'); return false; }
+let inFlight: Promise<boolean> | null = null;
 
-  log('fetching from backend...');
-  const rows = await getServices({ limit: 500 });
-  log(`got ${rows.length} rows`);
-  log(`first row name: ${rows[0]?.name ?? '(none)'}`);
-  log(`first row location type: ${typeof rows[0]?.location}`);
-  log(`first row location value: ${String(rows[0]?.location).slice(0, 50)}`);
+export function refreshServicesIfStale(): Promise<boolean> {
+  if (inFlight) return inFlight;
 
-  await db.transaction('rw', db.services, db.meta, async () => {
-    await db.services.clear();
-    await db.services.bulkPut(rows);
-    await db.meta.put({ key: 'services_last_synced', value: String(Date.now()) });
-  });
-  log(`wrote ${rows.length} rows to dexie`);
-  return true;
+  inFlight = (async () => {
+    try {
+      log('refreshServicesIfStale called');
+      if (!(await isCacheStale())) { log('cache fresh, skipping'); return false; }
+
+      log('fetching from backend...');
+      const rows = await getServices({ limit: 500 });
+      log(`got ${rows.length} rows`);
+
+      await db.transaction('rw', db.services, db.meta, async () => {
+        await db.services.clear();
+        await db.services.bulkPut(rows);
+        await db.meta.put({ key: 'services_last_synced', value: String(Date.now()) });
+      });
+      log(`wrote ${rows.length} rows to dexie`);
+      return true;
+    } finally {
+      inFlight = null;
+    }
+  })();
+
+  return inFlight;
 }
 
 export async function getCachedServices(): Promise<Service[]> {

@@ -56,7 +56,7 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr :%DEMO_PORT% ^| findstr LISTE
   taskkill /F /PID %%a >nul 2>&1
 )
 
-timeout /t 1 /nobreak >nul
+ping -n 2 127.0.0.1 >nul
 echo [OK] Cleanup done.
 echo.
 
@@ -68,15 +68,15 @@ start "ServiceFinder - Demo Server" cmd /k "cd /d %BACKEND% && npm run dev:demo"
 
 set /a WAIT_COUNT=0
 :wait_for_server
-timeout /t 1 /nobreak >nul
 netstat -ano | findstr :%DEMO_PORT% | findstr LISTENING >nul
 if errorlevel 1 (
   set /a WAIT_COUNT+=1
-  if !WAIT_COUNT! lss 15 (
-    echo     - waiting for port %DEMO_PORT% ... [!WAIT_COUNT!/15]
+  if !WAIT_COUNT! lss 30 (
+    echo     - waiting for port %DEMO_PORT% ... [!WAIT_COUNT!/30]
+    ping -n 2 127.0.0.1 >nul
     goto wait_for_server
   )
-  echo [X] Demo server did not start within 15 seconds.
+  echo [X] Demo server did not start within 30 seconds.
   echo     Check the "ServiceFinder - Demo Server" window for errors.
   pause
   exit /b 1
@@ -90,7 +90,6 @@ REM ---------------------------------------------------------------
 echo [5/6] Starting ngrok tunnel...
 start "ServiceFinder - ngrok" cmd /k "ngrok http 127.0.0.1:%DEMO_PORT%"
 
-timeout /t 3 /nobreak >nul
 echo [OK] ngrok window opened.
 echo.
 
@@ -112,8 +111,6 @@ echo.
 
 REM ---------------------------------------------------------------
 REM  Interactive launcher loop
-REM  Keeps this window alive. Press S + Enter to stop everything
-REM  cleanly (kills ngrok and the demo server), then exits.
 REM ---------------------------------------------------------------
 :main_loop
 set "CMD="
@@ -131,5 +128,4 @@ for /f "tokens=5" %%a in ('netstat -ano ^| findstr :%DEMO_PORT% ^| findstr LISTE
   taskkill /F /PID %%a >nul 2>&1
 )
 echo [OK] All demo processes stopped.
-timeout /t 2 /nobreak >nul
 exit /b 0

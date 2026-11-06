@@ -70,6 +70,9 @@ export async function updateServiceDetails(
         phone?: string | null
         wheelchair?: string | null
         sourcename?: string | null
+        status?: string
+        review_note?: string | null
+        reviewed_by?: string | null
     }
 ){
     const { data, error } = await supabase
@@ -87,6 +90,30 @@ export async function findServiceById(id: string) {
     .from('services')
     .select('id')
     .eq('id', id)
+    .single()
+
+  return { data, error }
+}
+
+export async function createServiceSuggestion(row: {
+  name: string
+  type: string | null
+  formatted_address: string | null
+  location: string | null
+  phone?: string | null
+  website?: string | null
+  opening_hours?: string | null
+  submitted_by: string
+}) {
+  const { data, error } = await supabase
+    .from('services')
+    .insert({
+      ...row,
+      status: 'pending',
+      sourcename: 'user',
+      imported_at: null,
+    })
+    .select()
     .single()
 
   return { data, error }

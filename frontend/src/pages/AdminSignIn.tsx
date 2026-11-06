@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import AuthLayout from '../components/Auth/AuthLayout';
-import { loginRequest } from '../services/api';
+import { loginRequest, getMe } from '../services/api';
 
 function AdminSignIn() {
   const navigate = useNavigate();
@@ -42,53 +42,72 @@ function AdminSignIn() {
           setIsSubmitting(true);
           try {
             const response = await loginRequest(email.trim(), password);
-            if (response.session) {
-              localStorage.setItem('servicefinder_access_token', response.session.access_token);
+            const token = response.session?.access_token;
+            if (!token) {
+              setErrorMessage('Login succeeded but no session was returned. Contact an administrator.');
+              return;
+            }
+
+            // Temporarily persist the token so getMe() can authenticate.
+            localStorage.setItem('servicefinder_access_token', token);
+            if (response.session?.refresh_token) {
               localStorage.setItem('servicefinder_refresh_token', response.session.refresh_token);
             }
+
+            // Verify the role *before* navigating.
+            const me = await getMe();
+            if (me.role !== 'admin') {
+              // Clean up — this was a regular user, not an admin.
+              localStorage.removeItem('servicefinder_access_token');
+              localStorage.removeItem('servicefinder_refresh_token');
+              setErrorMessage('This account does not have admin access.');
+              return;
+            }
+
             setErrorMessage('');
-            // The ProtectedAdmin route will verify the role
             navigate('/admin/dashboard');
           } catch (error) {
+            localStorage.removeItem('servicefinder_access_token');
+            localStorage.removeItem('servicefinder_refresh_token');
             setErrorMessage(error instanceof Error ? error.message : 'Unable to log in. Please try again.');
           } finally {
             setIsSubmitting(false);
           }
         }} noValidate>
           {errorMessage && <p className="form-error" role="alert">{errorMessage}</p>}
-          
+
           <label className="field-label" htmlFor="email">Email address</label>
           <div className="input-wrap">
             <span className="input-icon" aria-hidden="true">✉</span>
-            <input 
-              id="email" 
-              name="email" 
-              type="email" 
-              value={email} 
-              onChange={(event) => handleFieldChange(setEmail, event.target.value)} 
-              placeholder="Admin email address" 
-              autoComplete="email" 
-              required 
+            <input
+              id="email"
+              name="email"
+              type="email"
+              value={email}
+              onChange={(event) => handleFieldChange(setEmail, event.target.value)}
+              placeholder="Admin email address"
+              autoComplete="email"
+              required
             />
           </div>
 
           <label className="field-label" htmlFor="password">Password</label>
           <div className="input-wrap">
             <span className="input-icon" aria-hidden="true">♙</span>
-            <input 
-              id="password" 
-              name="password" 
-              type={showPassword ? 'text' : 'password'} 
-              value={password} 
-              onChange={(event) => handleFieldChange(setPassword, event.target.value)} 
-              placeholder="Enter password" 
-              autoComplete="current-password" 
-              required 
+            <input
+              id="password"
+              name="password"
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(event) => handleFieldChange(setPassword, event.target.value)}
+              placeholder="Enter password"
+              autoComplete="current-password"
+              required
             />
-            <button 
-              className="visibility-button" 
-              type="button" 
-              onClick={() => setShowPassword(!showPassword)} 
+            <button
+              className="visibility-button"
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
               aria-label={showPassword ? 'Hide password' : 'Show password'}
             >
               {showPassword ? '◉' : '◌'}

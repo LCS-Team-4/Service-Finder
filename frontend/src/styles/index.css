@@ -2186,3 +2186,188 @@ a {
 		left: calc(100vw - 15px);
 	}
 }
+
+/* =========================================
+   ADMIN SIDEBAR TABS & LIST
+   ========================================= */
+.admin-tabs {
+  display: flex;
+  border-bottom: 1px solid #c8a97e;
+  margin-bottom: 20px;
+}
+
+.admin-tab {
+  flex: 1;
+  padding: 10px;
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  font-family: 'Cormorant SC', serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: #8b5a2b;
+  cursor: pointer;
+  text-align: center;
+}
+
+.admin-tab.active {
+  border-bottom-color: #4a2b16;
+  color: #4a2b16;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.admin-service-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-service-card {
+  background: #fff;
+  border: 1px solid #c8a97e;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.admin-service-card:hover {
+  border-color: #4a2b16;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.admin-service-card h4 {
+  margin: 0 0 4px;
+  font-family: 'Cormorant SC', serif;
+  font-size: 16px;
+  color: #4a2b16;
+}
+
+.admin-service-card p {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: #6b4423;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.admin-service-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.admin-action-btn {
+  flex: 1;
+  padding: 6px;
+  border: 1px solid transparent;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+}
+
+.admin-action-btn.approve {
+  background: #e6f4ea;
+  color: #1e8e3e;
+  border-color: #b7e1c5;
+}
+.admin-action-btn.approve:hover { background: #ceead6; }
+
+.admin-action-btn.reject {
+  background: #fce8e6;
+  color: #d93025;
+  border-color: #fad2cf;
+}
+.admin-action-btn.reject:hover { background: #f6c7c4; }
+
+/* =========================================
+   SUGGEST SERVICE MODAL
+   ========================================= */
+.suggest-trigger {
+  right: 14px;
+  bottom: 62px; /* stacked above the Legend button */
+}
+
+.suggest-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(58, 31, 11, 0.5);
+  backdrop-filter: blur(2px);
+}
+
+.suggest-modal {
+  position: relative;
+  width: min(100%, 460px);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 30px 28px 26px;
+  background: linear-gradient(145deg, #f4d18c, #e6b466);
+  border: 1px solid #8b5a2b;
+  outline: 3px double #f8dfa8;
+  box-shadow: 0 20px 40px rgba(58, 31, 11, 0.4);
+  color: #4a2b16;
+}
+
+.suggest-modal h2 {
+  margin: 0 0 6px;
+  text-align: center;
+  font: 600 22px 'Cormorant SC', serif;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.suggest-hint {
+  margin: 0 0 18px;
+  text-align: center;
+  font: italic 13px 'Playfair Display', serif;
+  color: #6b4423;
+}
+
+.suggest-modal form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.suggest-modal .field-label {
+  margin-bottom: -6px; /* pulls label closer to the input */
+}
+
+.suggest-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: #624422;
+  cursor: pointer;
+}
+
+.suggest-close:hover {
+  background: rgba(103, 67, 31, 0.12);
+  border-radius: 4px;
+}
+
+/* Mobile: full-width modal */
+@media (max-width: 780px) {
+  .suggest-trigger {
+    right: 12px;
+    bottom: 62px;
+  }
+  .suggest-modal {
+    width: 100%;
+    max-height: 85vh;
+  }
+}
