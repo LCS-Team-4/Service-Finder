@@ -50,8 +50,6 @@ const getCoordinates = (location: Service['location']): [number, number] | null 
   ];
 };
 
-// PERF: cache Place objects by service ID so the geometry parser doesn't rerun
-// for every row whenever Dexie emits a fresh `services` array (e.g. on refresh).
 const placeCache = new Map<string, Place | null>();
 
 const toPlace = (service: Service): Place | null => {
@@ -76,7 +74,6 @@ export default function Home() {
   const { services, loading, error } = useServices();
   const [isMapMoving, setIsMapMoving] = useState(false);
   const [query, setQuery] = useState('');
-  // PERF: keep the input snappy while the heavy memos filter at low priority.
   const deferredQuery = useDeferredValue(query);
   const [active, setActive] = useState<Set<Category>>(() => new Set());
   const [selected, setSelected] = useState<Place | null>(null);
@@ -122,7 +119,6 @@ export default function Home() {
     [allPlaces],
   );
 
-  // Per-category totals within the current radius (denominator in "X of Y").
   const categoryTotals = useMemo(() => {
     const totals = new Map<Category, number>();
     for (const place of allPlaces) {
@@ -134,7 +130,6 @@ export default function Home() {
     return totals;
   }, [allPlaces, userLocation, radiusKm]);
 
-  // Per-category matches for the current search text (numerator in "X of Y").
   const categoryMatches = useMemo(() => {
     const q = deferredQuery.trim().toLowerCase();
     const matches = new Map<Category, number>();
@@ -256,17 +251,12 @@ export default function Home() {
 
   const visibleIncidents = useMemo(
     () => incidents.filter((incident) => {
-      // 1. Hide if the legend toggle is off for this category
       if (hiddenIncidents.has(incident.icon_category ?? null)) {
         return false;
       }
-
-      // 2. If no user location or radius, show everything
       if (!userLocation || radiusKm === null) {
         return true;
       }
-
-      // 3. Otherwise, only show incidents whose midpoint is within the radius
       const coordinates = parseIncidentGeometry(incident.geometry);
       if (coordinates.length === 0) return false;
 
@@ -450,7 +440,6 @@ export default function Home() {
     [],
   );
 
-  // PERF: stable callbacks so memo() on ServicePopup actually prevents re-renders.
   const handleClosePopup = useCallback(() => {
     setSelected(null);
     setRouteTarget(null);
@@ -550,7 +539,6 @@ export default function Home() {
             >
               Clear route
             </button>
-
             {routeDistance && (
               <div className="route-distance">
                 {routeDistance} km away
@@ -566,15 +554,46 @@ export default function Home() {
           locationLabel={userLocation ? 'Your location' : 'Cape Town'}
         />
 
+        {/* Desktop-only standalone buttons (visible on wide screens) */}
         <button
           type="button"
-          className="panel-trigger user-trigger"
+          className="panel-trigger about-trigger desktop-only"
+          onClick={() => {
+            setAboutOpen((open) => !open);
+            setLegendOpen(false);
+          }}
+        >
+          <BookOpen size={17} /> About
+        </button>
+        <button
+          className="panel-trigger legend-trigger desktop-only"
+          onClick={() => {
+            setLegendOpen((open) => !open);
+            setAboutOpen(false);
+          }}
+        >
+          <MapPinned size={17} /> Legend
+        </button>
+        <button
+          type="button"
+          className="panel-trigger user-trigger desktop-only"
           onClick={() => setUserMenuOpen(true)}
           aria-label="Open user menu"
         >
           <User size={17} /> Account
         </button>
 
+        {/* Mobile bottom nav (visible <= 780px via CSS) */}
+        <div className="mobile-bottom-nav">
+          <button
+            className="panel-trigger about-trigger"
+            onClick={() => {
+              setAboutOpen((open) => !open);
+              setLegendOpen(false);
+            }}
+          >
+            <BookOpen size={17} /> <span className="nav-text">About</span>
+          </button>
           <button
             type="button"
             className="map-layer-toggle"
@@ -582,9 +601,8 @@ export default function Home() {
             onClick={() => setSatellite((current) => !current)}
           >
             <Layers size={16} />
-            <span className="nav-text">{satellite ? 'Street map' : 'Satellite'}</span>
+            <span className="nav-text">{satellite ? 'Street' : 'Satellite'}</span>
           </button>
-
           <button
             className="panel-trigger legend-trigger"
             onClick={() => {
@@ -593,6 +611,14 @@ export default function Home() {
             }}
           >
             <MapPinned size={17} /> <span className="nav-text">Legend</span>
+          </button>
+          <button
+            type="button"
+            className="panel-trigger user-trigger"
+            onClick={() => setUserMenuOpen(true)}
+            aria-label="Open user menu"
+          >
+            <User size={17} /> <span className="nav-text">Account</span>
           </button>
         </div>
 
@@ -701,7 +727,6 @@ export default function Home() {
           </aside>
         )}
 
-        {/* User sidebar — sibling of the other panels, fixed-position, toggled by `userMenuOpen` */}
         <UserSidebar open={userMenuOpen} onClose={() => setUserMenuOpen(false)} />
 
         <div className="leaflet-zoom" style={{ display: isMobile ? 'none' : 'grid' }}>
