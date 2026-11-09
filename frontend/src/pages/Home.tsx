@@ -1,5 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, Layers, MapPinned, Minus, Plus, X, LocateFixed } from 'lucide-react';
+import { BookOpen, Layers, MapPinned, Minus, Plus, X, LocateFixed, User } from 'lucide-react';
 import LeafletMap, { parseIncidentGeometry } from '../components/Map/LeafletMap';
 import WeatherWidget from '../components/Map/WeatherWidget';
 import GuideSearch from '../components/SearchBar/GuideSearch';
@@ -14,6 +14,7 @@ import { categoryColor } from '../utils/constants';
 import { buildIncidentLegend } from '../services/trafficLegend';
 import { distanceKm, isMobileViewport } from '../utils/geo';
 import { ScrollHint } from '../components/common/ScrollHint';
+import UserSidebar from '../components/common/UserSidebar';
 import type { Category, Place, Service } from '../types/service.types';
 
 interface CategoryItem {
@@ -82,6 +83,7 @@ export default function Home() {
   const [notice, setNotice] = useState('');
   const [aboutOpen, setAboutOpen] = useState(false);
   const [legendOpen, setLegendOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [saved, setSaved] = useState<string[]>([]);
   const [userLocation, setUserLocation] = useState<UserLocation | null>(null);
   const { incidents } = useTrafficIncidents(Boolean(userLocation));
@@ -252,41 +254,40 @@ export default function Home() {
     [incidents],
   );
 
-const visibleIncidents = useMemo(
-  () => incidents.filter((incident) => {
-    // 1. Hide if the legend toggle is off for this category
-    if (hiddenIncidents.has(incident.icon_category ?? null)) {
-      return false;
-    }
+  const visibleIncidents = useMemo(
+    () => incidents.filter((incident) => {
+      // 1. Hide if the legend toggle is off for this category
+      if (hiddenIncidents.has(incident.icon_category ?? null)) {
+        return false;
+      }
 
-    // 2. If no user location or radius, show everything (current behavior)
-    if (!userLocation || radiusKm === null) {
-      return true;
-    }
+      // 2. If no user location or radius, show everything
+      if (!userLocation || radiusKm === null) {
+        return true;
+      }
 
-    // 3. Otherwise, only show incidents whose midpoint is within the radius
-    const coordinates = parseIncidentGeometry(incident.geometry);
-    if (coordinates.length === 0) return false;
+      // 3. Otherwise, only show incidents whose midpoint is within the radius
+      const coordinates = parseIncidentGeometry(incident.geometry);
+      if (coordinates.length === 0) return false;
 
-    const [lng, lat] = coordinates[Math.floor(coordinates.length / 2)];
-    const distance = distanceKm(
-      { lat, lng },
+      const [lng, lat] = coordinates[Math.floor(coordinates.length / 2)];
+      const distance = distanceKm(
+        { lat, lng },
+        { lat: userLocation.lat, lng: userLocation.lng },
+      );
+
+      return distance <= radiusKm;
+    }),
+    [incidents, hiddenIncidents, userLocation, radiusKm],
+  );
+
+  const routeDistance = useMemo(() => {
+    if (!userLocation || !routeTarget) return null;
+    return distanceKm(
       { lat: userLocation.lat, lng: userLocation.lng },
-    );
-
-    return distance <= radiusKm;
-  }),
-  [incidents, hiddenIncidents, userLocation, radiusKm],
-);
-
-  // Right below your other useMemo hooks
-const routeDistance = useMemo(() => {
-  if (!userLocation || !routeTarget) return null;
-  return distanceKm(
-    { lat: userLocation.lat, lng: userLocation.lng },
-    { lat: routeTarget.lat, lng: routeTarget.lng }
-  ).toFixed(1); // 1 decimal place (e.g. "4.2")
-}, [userLocation, routeTarget]);
+      { lat: routeTarget.lat, lng: routeTarget.lng },
+    ).toFixed(1);
+  }, [userLocation, routeTarget]);
 
   const toggleIncident = useCallback((code: number | null) => {
     setHiddenIncidents((current) => {
@@ -470,7 +471,7 @@ const routeDistance = useMemo(() => {
 
   const showMobilePrompt = isMobile && !userLocation && !loading;
 
-    return (
+  return (
     <main className={`guide-shell ${routeTarget ? 'is-routing' : ''}`}>
       <div className="map-stage">
         <LeafletMap
@@ -549,7 +550,7 @@ const routeDistance = useMemo(() => {
             >
               Clear route
             </button>
-            
+
             {routeDistance && (
               <div className="route-distance">
                 {routeDistance} km away
@@ -564,6 +565,15 @@ const routeDistance = useMemo(() => {
           now={now}
           locationLabel={userLocation ? 'Your location' : 'Cape Town'}
         />
+
+        <button
+          type="button"
+          className="panel-trigger user-trigger"
+          onClick={() => setUserMenuOpen(true)}
+          aria-label="Open user menu"
+        >
+          <User size={17} /> Account
+        </button>
 
         <button
           type="button"
@@ -698,6 +708,9 @@ const routeDistance = useMemo(() => {
             <ScrollHint targetRef={legendPanelRef} label="Scroll for more" />
           </aside>
         )}
+
+        {/* User sidebar — sibling of the other panels, fixed-position, toggled by `userMenuOpen` */}
+        <UserSidebar open={userMenuOpen} onClose={() => setUserMenuOpen(false)} />
 
         <div className="leaflet-zoom" style={{ display: isMobile ? 'none' : 'grid' }}>
           <button aria-label="Zoom in" onClick={() => mapRef.current?.zoomIn()}><Plus size={18} /></button>
