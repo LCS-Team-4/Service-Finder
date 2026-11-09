@@ -565,34 +565,37 @@ const routeDistance = useMemo(() => {
           locationLabel={userLocation ? 'Your location' : 'Cape Town'}
         />
 
-        <button
-          type="button"
-          className="map-layer-toggle"
-          aria-pressed={satellite}
-          onClick={() => setSatellite((current) => !current)}
-        >
-          <Layers size={16} />
-          <span>{satellite ? 'Street map' : 'Satellite'}</span>
-        </button>
+                <div className="mobile-bottom-nav">
+          <button
+            className="panel-trigger about-trigger"
+            onClick={() => {
+              setAboutOpen((open) => !open);
+              setLegendOpen(false);
+            }}
+          >
+            <BookOpen size={17} /> <span className="nav-text">About</span>
+          </button>
 
-        <button
-          className="panel-trigger about-trigger"
-          onClick={() => {
-            setAboutOpen((open) => !open);
-            setLegendOpen(false);
-          }}
-        >
-          <BookOpen size={17} /> About the Guide
-        </button>
-        <button
-          className="panel-trigger legend-trigger"
-          onClick={() => {
-            setLegendOpen((open) => !open);
-            setAboutOpen(false);
-          }}
-        >
-          <MapPinned size={17} /> Legend
-        </button>
+          <button
+            type="button"
+            className="map-layer-toggle"
+            aria-pressed={satellite}
+            onClick={() => setSatellite((current) => !current)}
+          >
+            <Layers size={16} />
+            <span className="nav-text">{satellite ? 'Street map' : 'Satellite'}</span>
+          </button>
+
+          <button
+            className="panel-trigger legend-trigger"
+            onClick={() => {
+              setLegendOpen((open) => !open);
+              setAboutOpen(false);
+            }}
+          >
+            <MapPinned size={17} /> <span className="nav-text">Legend</span>
+          </button>
+        </div>
 
         {aboutOpen && (
           <aside className="about popup-panel" ref={aboutPanelRef}>
