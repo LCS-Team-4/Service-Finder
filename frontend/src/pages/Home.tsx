@@ -583,6 +583,47 @@ export default function Home() {
           <User size={17} /> Account
         </button>
 
+                {/* Desktop standalone buttons */}
+        <button
+          type="button"
+          className="panel-trigger about-trigger desktop-only"
+          onClick={() => {
+            setAboutOpen((open) => !open);
+            setLegendOpen(false);
+          }}
+        >
+          <BookOpen size={17} /> About
+        </button>
+        <button
+          className="panel-trigger legend-trigger desktop-only"
+          onClick={() => {
+            setLegendOpen((open) => !open);
+            setAboutOpen(false);
+          }}
+        >
+          <MapPinned size={17} /> Legend
+        </button>
+
+        {/* ✅ ADD THIS — Satellite toggle for desktop */}
+        <button
+          type="button"
+          className="map-layer-toggle desktop-only"
+          aria-pressed={satellite}
+          onClick={() => setSatellite((current) => !current)}
+        >
+          <Layers size={16} />
+          <span>{satellite ? 'Street map' : 'Satellite'}</span>
+        </button>
+
+        <button
+          type="button"
+          className="panel-trigger user-trigger desktop-only"
+          onClick={() => setUserMenuOpen(true)}
+          aria-label="Open user menu"
+        >
+          <User size={17} /> Account
+        </button>
+
         {/* Mobile bottom nav (visible <= 780px via CSS) */}
         <div className="mobile-bottom-nav">
           <button
