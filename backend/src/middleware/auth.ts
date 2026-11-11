@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express'
 import { createClient } from '@supabase/supabase-js'
+import { supabase } from '../config/supabase' // <--- IMPORT THE DB CLIENT
 
 export type AuthRequest = Request & {
 	auth?: {
@@ -15,7 +16,6 @@ export type AuthRequest = Request & {
 // the user's token, and every subsequent query runs through RLS as that user
 // instead of as the service role. That's what produced the 42501 errors.
 
-// important shiz
 const supabaseUrl = process.env.SUPABASE_URL
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY
 
@@ -65,12 +65,24 @@ export async function authenticateToken(
 	}
 }
 
-export function requireAdmin(
+// NEW: Check the DB directly, ignoring the JWT metadata
+export async function requireAdmin(
 	req: AuthRequest,
 	res: Response,
 	next: NextFunction,
 ) {
-	if (req.auth?.role !== 'admin') {
+	if (!req.auth?.userId) {
+		return res.status(401).json({ error: 'Authentication required' })
+	}
+
+	// Check the profiles table directly using the shared DB client
+	const { data: profile, error } = await supabase
+		.from('profiles')
+		.select('role')
+		.eq('id', req.auth.userId)
+		.single()
+
+	if (error || !profile || profile.role !== 'admin') {
 		return res.status(403).json({ error: 'Admin access required' })
 	}
 

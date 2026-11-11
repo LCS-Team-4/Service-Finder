@@ -90,6 +90,7 @@ export default function Home() {
   const [searchLocationStatus, setSearchLocationStatus] = useState<'idle' | 'locating' | 'unavailable'>('idle');
   const [radiusKm, setRadiusKm] = useState<number | null>(5);
   const [hiddenIncidents, setHiddenIncidents] = useState<Set<number | null>>(() => new Set());
+  const [suggestOpen, setSuggestOpen] = useState(false);
   const weatherLocation = userLocation ?? DEFAULT_WEATHER_LOCATION;
   const { weather, error: weatherError, now } = useWeather(weatherLocation.lat, weatherLocation.lng);
 
@@ -189,7 +190,7 @@ export default function Home() {
             lat: position.coords.latitude,
             lng: position.coords.longitude,
             accuracy: position.coords.accuracy,
-          };
+          };+
           setUserLocation(location);
           resolve(location);
         },
@@ -604,7 +605,7 @@ export default function Home() {
           <MapPinned size={17} /> Legend
         </button>
 
-        {/* ✅ ADD THIS — Satellite toggle for desktop */}
+        {/* Satellite toggle for desktop */}
         <button
           type="button"
           className="map-layer-toggle desktop-only"
@@ -768,7 +769,21 @@ export default function Home() {
           </aside>
         )}
 
-        <UserSidebar open={userMenuOpen} onClose={() => setUserMenuOpen(false)} />
+        <UserSidebar 
+          open={userMenuOpen} 
+          onClose={() => setUserMenuOpen(false)} 
+          onSuggest={() => setSuggestOpen(true)}
+        />
+
+                {suggestOpen && (
+          <SuggestServiceModal
+            onClose={() => setSuggestOpen(false)}
+            onSuccess={() => {
+              setSuggestOpen(false);
+              setNotice('Suggestion submitted for review!');
+            }}
+          />
+        )}
 
         <div className="leaflet-zoom" style={{ display: isMobile ? 'none' : 'grid' }}>
           <button aria-label="Zoom in" onClick={() => mapRef.current?.zoomIn()}><Plus size={18} /></button>

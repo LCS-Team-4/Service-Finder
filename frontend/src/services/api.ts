@@ -220,3 +220,20 @@ export function triggerTrafficImport() {
     headers: authHeaders(),
   });
 }
+
+export type UserSuggestion = {
+  id: string;
+  name: string;
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+};
+
+export function getMySuggestions() {
+  const token = localStorage.getItem('servicefinder_access_token');
+  if (!token) return Promise.reject(new Error('No token'));
+  
+  return request<UserSuggestion[]>('/services/my-suggestions', {
+    method: 'GET',
+    headers: authHeaders(),
+  });
+}

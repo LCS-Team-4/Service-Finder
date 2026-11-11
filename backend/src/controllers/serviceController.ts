@@ -206,3 +206,22 @@ export async function suggestService(req: AuthRequest, res: Response, next: Next
     next(error)
   }
 }
+
+export async function getUserSuggestions(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    if (!req.auth?.userId) {
+      return res.status(401).json({ message: 'Authentication required' })
+    }
+
+    const { data, error } = await supabase
+      .from('services')
+      .select('id, name, status, created_at')
+      .eq('submitted_by', req.auth.userId)
+      .order('created_at', { ascending: false })
+
+    if (error) throw error
+    res.json(data ?? [])
+  } catch (error) {
+    next(error)
+  }
+}
