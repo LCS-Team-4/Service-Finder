@@ -139,6 +139,28 @@ export function suggestService(payload: {
   });
 }
 
+export function updateServiceFields(
+  id: string,
+  payload: {
+    name?: string;
+    type?: string;
+    formatted_address?: string;
+    location?: string;
+    opening_hours?: string | null;
+    phone?: string | null;
+    website?: string | null;
+    wheelchair?: string | null;
+  },
+) {
+  const token = localStorage.getItem('servicefinder_access_token');
+  if (!token) return Promise.reject(new Error('No token'));
+  return request<{ data: AdminService }>(`/services/${id}`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify(payload),
+  });
+}
+
 // =========================================
 // ADMIN
 // =========================================
@@ -166,37 +188,18 @@ export function getServicesByStatus(status: string) {
   });
 }
 
-/** Update a service's status (approve/reject/pending). */
-export function updateServiceStatus(id: string, status: 'approved' | 'rejected' | 'pending') {
-  const token = localStorage.getItem('servicefinder_access_token');
-  if (!token) return Promise.reject(new Error('No token'));
-  return request<{ data: AdminService }>(`/services/${id}`, {
-    method: 'PATCH',
-    headers: authHeaders(),
-    body: JSON.stringify({ status }),
-  });
-}
 
-/** Update arbitrary fields on a service (used by marker edit mode). */
-export function updateServiceFields(
+export function updateServiceStatus(
   id: string,
-  payload: {
-    name?: string;
-    type?: string;
-    formatted_address?: string;
-    location?: string;
-    opening_hours?: string | null;
-    phone?: string | null;
-    website?: string | null;
-    wheelchair?: string | null;
-  },
+  status: 'approved' | 'rejected' | 'pending',
+  review_note?: string,
 ) {
   const token = localStorage.getItem('servicefinder_access_token');
   if (!token) return Promise.reject(new Error('No token'));
   return request<{ data: AdminService }>(`/services/${id}`, {
     method: 'PATCH',
     headers: authHeaders(),
-    body: JSON.stringify(payload),
+    body: JSON.stringify(review_note ? { status, review_note } : { status }),
   });
 }
 
