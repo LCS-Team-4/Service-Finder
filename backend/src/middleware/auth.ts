@@ -27,6 +27,12 @@ const supabaseAuthClient = createClient(supabaseUrl, supabaseServiceKey, {
 		persistSession: false,
 		autoRefreshToken: false,
 		detectSessionInUrl: false,
+		// FIX: A unique storageKey stops the auth client from sharing session
+		// state with the service-role client. Without this, `getUser()` can
+		// leak the user's session into the shared `supabase` client, causing
+		// subsequent queries to run through RLS as the user (returning 0 rows
+		// for pending services).
+		storageKey: 'sb-auth-only-client',
 	},
 })
 

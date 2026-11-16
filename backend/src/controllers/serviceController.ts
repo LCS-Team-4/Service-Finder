@@ -147,18 +147,36 @@ export async function getServicesByStatus(req: Request, res: Response, next: Nex
     const status = typeof req.query.status === 'string' ? req.query.status : undefined
     const limit = Math.min(Math.max(Number(req.query.limit ?? 50), 1), 200)
 
-    let query = supabase
-      .from('services')
-      .select('*, category:service_categories(id,name,slug,parent_id)')
-      .limit(limit)
-      .order('created_at', { ascending: false })
+    console.log(`\n--- [DEBUG] getServicesByStatus ---`)
+    console.log(`[DEBUG] Querying for status: "${status}"`)
 
+    // Construct the raw PostgREST URL
+    const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/services`)
+    url.searchParams.set('select', '*,category:service_categories(id,name,slug,parent_id)')
+    url.searchParams.set('limit', String(limit))
+    url.searchParams.set('order', 'created_at.desc')
+    
     if (status) {
-      query = query.eq('status', status)
+      url.searchParams.set('status', `eq.${status}`)
     }
 
-    const { data, error } = await query
-    if (error) throw error
+    // Use raw fetch with the service-role key to BYPASS the SDK entirely
+    const response = await fetch(url.toString(), {
+      headers: {
+        'apikey': process.env.SUPABASE_SERVICE_KEY!,
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_KEY!}`,
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.log(`[DEBUG] Supabase raw fetch failed: ${response.status} - ${errorText}`)
+      throw new Error(`Supabase returned ${response.status}: ${errorText}`)
+    }
+
+    const data = await response.json()
+    console.log(`[DEBUG] Raw fetch returned ${data?.length ?? 0} rows`)
 
     const enriched = (data ?? []).map((row: any) => ({
       ...row,
@@ -183,7 +201,6 @@ export async function suggestService(req: AuthRequest, res: Response, next: Next
       return res.status(400).json({ message: 'A service name is required' })
     }
 
-    // Optional coordinates — only used if both are numeric.
     const location =
       typeof latitude === 'number' && typeof longitude === 'number'
         ? `SRID=4326;POINT(${longitude} ${latitude})`

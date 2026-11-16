@@ -11,6 +11,7 @@ async function request<T>(path: string, options: RequestInit): Promise<T> {
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...options,
+      cache: 'no-store',
       headers: {
         'Content-Type': 'application/json',
         'ngrok-skip-browser-warning': 'true',
