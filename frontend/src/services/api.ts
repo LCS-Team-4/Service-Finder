@@ -139,28 +139,6 @@ export function suggestService(payload: {
   });
 }
 
-export function updateServiceFields(
-  id: string,
-  payload: {
-    name?: string;
-    type?: string;
-    formatted_address?: string;
-    location?: string;
-    opening_hours?: string | null;
-    phone?: string | null;
-    website?: string | null;
-    wheelchair?: string | null;
-  },
-) {
-  const token = localStorage.getItem('servicefinder_access_token');
-  if (!token) return Promise.reject(new Error('No token'));
-  return request<{ data: AdminService }>(`/services/${id}`, {
-    method: 'PATCH',
-    headers: authHeaders(),
-    body: JSON.stringify(payload),
-  });
-}
-
 // =========================================
 // ADMIN
 // =========================================
@@ -188,7 +166,6 @@ export function getServicesByStatus(status: string) {
   });
 }
 
-
 export function updateServiceStatus(
   id: string,
   status: 'approved' | 'rejected' | 'pending',
@@ -200,6 +177,28 @@ export function updateServiceStatus(
     method: 'PATCH',
     headers: authHeaders(),
     body: JSON.stringify(review_note ? { status, review_note } : { status }),
+  });
+}
+
+export function updateServiceFields(
+  id: string,
+  payload: {
+    name?: string;
+    type?: string;
+    formatted_address?: string;
+    location?: string;
+    opening_hours?: string | null;
+    phone?: string | null;
+    website?: string | null;
+    wheelchair?: string | null;
+  },
+) {
+  const token = localStorage.getItem('servicefinder_access_token');
+  if (!token) return Promise.reject(new Error('No token'));
+  return request<{ data: AdminService }>(`/services/${id}`, {
+    method: 'PATCH',
+    headers: authHeaders(),
+    body: JSON.stringify(payload),
   });
 }
 

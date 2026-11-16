@@ -129,7 +129,7 @@ export const updateService = async (req: AuthRequest, res: Response, next: NextF
 
     if (status && req.auth?.userId) {
       updates.reviewed_by = req.auth.userId
-      updates.review_note = req.body.review_note 
+      updates.review_note = req.body.review_note
         ?? (status === 'approved' ? 'Approved by admin' : 'Rejected by admin')
     }
 
@@ -171,46 +171,6 @@ export async function getServicesByStatus(req: Request, res: Response, next: Nex
   }
 }
 
-export async function createService(req: AuthRequest, res: Response, next: NextFunction) {
-  try {
-    if (!req.auth?.userId) return res.status(401).json({ message: 'Authentication required' })
-
-    const { name, type, formatted_address, phone, website, opening_hours, latitude, longitude } = req.body
-    if (!name || typeof name !== 'string' || !name.trim()) {
-      return res.status(400).json({ message: 'A service name is required' })
-    }
-
-    const location = typeof latitude === 'number' && typeof longitude === 'number'
-      ? `SRID=4326;POINT(${longitude} ${latitude})`
-      : null
-
-    const { data, error } = await supabase
-      .from('services')
-      .insert({
-        name: name.trim(),
-        type: type ?? null,
-        formatted_address: formatted_address ?? null,
-        location,
-        phone: phone ?? null,
-        website: website ?? null,
-        opening_hours: opening_hours ?? null,
-        status: 'approved', 
-        sourcename: 'admin',
-        submitted_by: req.auth.userId,
-        reviewed_by: req.auth.userId,
-        review_note: 'Created by admin',
-        imported_at: null,
-      })
-      .select()
-      .single()
-
-    if (error) throw error
-    return res.status(201).json({ data })
-  } catch (error) {
-    next(error)
-  }
-}
-
 export async function suggestService(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     if (!req.auth?.userId) {
@@ -223,7 +183,6 @@ export async function suggestService(req: AuthRequest, res: Response, next: Next
       return res.status(400).json({ message: 'A service name is required' })
     }
 
-    // Optional coordinates — only used if both are numeric.
     const location =
       typeof latitude === 'number' && typeof longitude === 'number'
         ? `SRID=4326;POINT(${longitude} ${latitude})`
