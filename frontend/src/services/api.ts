@@ -11,6 +11,7 @@ async function request<T>(path: string, options: RequestInit): Promise<T> {
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...options,
+      cache: 'no-store',
       headers: {
         'Content-Type': 'application/json',
         'ngrok-skip-browser-warning': 'true',
@@ -222,3 +223,22 @@ export function triggerTrafficImport() {
     headers: authHeaders(),
   });
 }
+
+export type UserSuggestion = {
+  id: string;
+  name: string;
+  type: string | null;
+  status: 'pending' | 'approved' | 'rejected' | string;
+  created_at: string;
+  review_note: string | null;
+};
+
+export function getMySuggestions() {
+  const token = localStorage.getItem('servicefinder_access_token');
+  if (!token) return Promise.reject(new Error('No token'));
+  return request<UserSuggestion[]>('/services/mine', {
+    method: 'GET',
+    headers: authHeaders(),
+  });
+}
+

@@ -9,9 +9,9 @@ export type AuthRequest = Request & {
   }
 }
 
-// Dedicated client used ONLY for verifying JWTs. Kept separate from the
-// shared service-role client in config/supabase.ts so that calling
-// .auth.getUser() here never mutates the shared client's session.
+// Dedicated client used ONLY to verify JWTs. Kept separate from the shared
+// service-role client (config/supabase.ts) so .auth.getUser() can never
+// downgrade the shared client to the user's session mid-request.
 const supabaseUrl = process.env.SUPABASE_URL
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY
 if (!supabaseUrl) throw new Error('SUPABASE_URL is not configured')
@@ -35,10 +35,13 @@ export async function authenticateToken(
     ? header.slice('Bearer '.length).trim()
     : undefined
 
-  if (!token) return res.status(401).json({ error: 'Access token required' })
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required' })
+  }
 
   try {
     const { data, error } = await supabaseAuthClient.auth.getUser(token)
+
     if (error || !data.user) {
       return res.status(401).json({ error: 'Invalid or expired access token' })
     }
@@ -50,6 +53,7 @@ export async function authenticateToken(
         ? data.user.app_metadata.role
         : undefined,
     }
+
     next()
   } catch (error) {
     next(error)
@@ -64,5 +68,6 @@ export function requireAdmin(
   if (req.auth?.role !== 'admin') {
     return res.status(403).json({ error: 'Admin access required' })
   }
+
   next()
 }

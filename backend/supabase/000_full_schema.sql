@@ -167,11 +167,11 @@ CREATE POLICY "Public read traffic"
   ON public.traffic_incidents FOR SELECT
   USING (true);
 
--- Authenticated users can insert pending services (suggestions)
-CREATE POLICY "Users can suggest services"
-  ON public.services FOR INSERT
-  TO authenticated
-  WITH CHECK (status = 'pending' AND submitted_by = auth.uid());
+-- -- Authenticated users can insert pending services (suggestions)
+-- CREATE POLICY "Users can suggest services"
+--   ON public.services FOR INSERT
+--   TO authenticated
+--   WITH CHECK (status = 'pending' AND submitted_by = auth.uid());
 
 -- Users can read/update their own profile
 CREATE POLICY "Users read own profile"

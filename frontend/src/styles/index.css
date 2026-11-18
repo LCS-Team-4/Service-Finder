@@ -2514,6 +2514,82 @@ a {
 	background: #f4d18c;
 }
 
+.user-suggestions {
+	margin-top: 20px;
+	flex: 1;
+	overflow-y: auto;
+}
+
+.user-section-title {
+	font: 600 14px 'Cormorant SC', serif;
+	letter-spacing: 1px;
+	text-transform: uppercase;
+	color: #8b5a2b;
+	border-bottom: 1px solid #c8a97e;
+	padding-bottom: 6px;
+	margin: 0 0 12px;
+}
+
+.user-empty-text {
+	font-size: 13px;
+	color: #6b4423;
+	font-style: italic;
+}
+
+.user-suggestion-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.user-suggestion-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 8px 12px;
+	background: rgba(255, 255, 255, 0.4);
+	border: 1px solid #c8a97e;
+	border-radius: 4px;
+	font-size: 13px;
+}
+
+.suggestion-name {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	font-weight: 600;
+}
+
+.suggestion-status {
+	font: 700 10px 'DM Sans', sans-serif;
+	padding: 2px 6px;
+	border-radius: 10px;
+	text-transform: uppercase;
+	flex-shrink: 0;
+}
+
+.suggestion-status.pending {
+	background: #fff4d8;
+	color: #8a540c;
+	border: 1px solid #e6c273;
+}
+
+.suggestion-status.approved {
+	background: #e6f4ea;
+	color: #1e8e3e;
+	border: 1px solid #b7e1c5;
+}
+
+.suggestion-status.rejected {
+	background: #ffebeb;
+	color: #a12a2a;
+	border: 1px solid #f5c2c2;
+}
+
 @media (max-width: 780px) {
 	.user-trigger {
 		right: 12px;
