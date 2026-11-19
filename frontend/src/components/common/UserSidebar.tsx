@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Mail, Shield, User, X, PlusCircle, Loader2 } from 'lucide-react';
+import { LogOut, Mail, Shield, User, X, PlusCircle, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import { getMe, getMySuggestions, type MeResponse, type UserSuggestion } from '../../services/api';
 
 interface UserSidebarProps {
@@ -15,29 +15,28 @@ export default function UserSidebar({ open, onClose, onSuggest }: UserSidebarPro
   const [error, setError] = useState('');
   const [suggestions, setSuggestions] = useState<UserSuggestion[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  
+  // NEW: State to handle the collapsible menu
+  const [isSuggestionsOpen, setIsSuggestionsOpen] = useState(false);
 
-  // Fetch profile and suggestions when the drawer opens
-  useEffect(() => {
-    if (!open) return;
-
-    // Fetch profile if we don't have it yet
-    if (!me) {
-      getMe()
-        .then(setMe)
-        .catch((err) => {
-          setError(err instanceof Error ? err.message : 'Unable to load profile.');
-        });
-    }
-
-    // Fetch user's suggestions
+  const fetchSuggestions = useCallback(() => {
     setLoadingSuggestions(true);
     getMySuggestions()
       .then(setSuggestions)
       .catch(console.error)
       .finally(() => setLoadingSuggestions(false));
-  }, [open, me]);
+  }, []);
 
-  // Close on Escape for a nice keyboard experience.
+  useEffect(() => {
+    if (!open) return;
+    if (!me) {
+      getMe()
+        .then(setMe)
+        .catch((err) => setError(err instanceof Error ? err.message : 'Unable to load profile.'));
+    }
+    fetchSuggestions();
+  }, [open, me, fetchSuggestions]);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -67,12 +66,9 @@ export default function UserSidebar({ open, onClose, onSuggest }: UserSidebarPro
           {me ? (
             <>
               <h3 className="user-name">{me.email?.split('@')[0]}</h3>
-              <p className="user-email">
-                <Mail size={13} /> {me.email}
-              </p>
+              <p className="user-email"><Mail size={13} /> {me.email}</p>
               <span className={`user-role ${isAdmin ? 'admin' : 'user'}`}>
-                {isAdmin ? <Shield size={12} /> : <User size={12} />}
-                {me.role}
+                {isAdmin ? <Shield size={12} /> : <User size={12} />} {me.role}
               </span>
             </>
           ) : error ? (
@@ -82,43 +78,55 @@ export default function UserSidebar({ open, onClose, onSuggest }: UserSidebarPro
           )}
         </div>
 
-        {/* User's Suggestions List */}
-        <div className="user-suggestions">
-          <h4 className="user-section-title">My Suggestions</h4>
-          {loadingSuggestions ? (
-            <div style={{ textAlign: 'center', padding: '10px' }}><Loader2 className="spin" size={16} /></div>
-          ) : suggestions.length === 0 ? (
-            <p className="user-empty-text">You haven't suggested any services yet.</p>
-          ) : (
-            <ul className="user-suggestion-list">
-              {suggestions.map(s => (
-                <li key={s.id} className="user-suggestion-item">
-                  <span className="suggestion-name">{s.name}</span>
-                  <span className={`suggestion-status ${s.status}`}>
-                    {s.status}
-                  </span>
-                </li>
-              ))}
-            </ul>
+        {/* NEW: Collapsible My Suggestions Section */}
+        <div className="user-suggestions-accordion" style={{ marginTop: '20px', padding: '0 12px' }}>
+          <button 
+            onClick={() => setIsSuggestionsOpen(!isSuggestionsOpen)}
+            style={{ 
+              width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              background: 'none', border: 'none', padding: '10px 0', 
+              font: '600 13px "Cormorant SC", serif', letterSpacing: '1px', 
+              color: '#8b5a2b', textTransform: 'uppercase', cursor: 'pointer',
+              borderBottom: '1px solid #c8a97e'
+            }}
+          >
+            <span>My Suggestions ({suggestions.length})</span>
+            {isSuggestionsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+
+          {/* The list drops down only if open */}
+          {isSuggestionsOpen && (
+            <div style={{ maxHeight: '200px', overflowY: 'auto', marginTop: '10px' }}>
+              {loadingSuggestions ? (
+                <div style={{ textAlign: 'center', padding: '10px' }}><Loader2 className="spin" size={16} /></div>
+              ) : suggestions.length === 0 ? (
+                <p className="user-empty-text" style={{ fontSize: '12px', fontStyle: 'italic', color: '#6b4423' }}>
+                  You haven't suggested any services yet.
+                </p>
+              ) : (
+                <ul className="user-suggestion-list">
+                  {suggestions.map(s => (
+                    <li key={s.id} className="user-suggestion-item" style={{ padding: '8px 6px', fontSize: '12px' }}>
+                      <span className="suggestion-name">{s.name}</span>
+                      <span className={`suggestion-status ${s.status}`}>{s.status}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
         </div>
 
-        <div className="user-sidebar-actions">
+        <div className="user-sidebar-actions" style={{ marginTop: 'auto' }}>
           <button
             className="user-admin-link"
-            onClick={() => {
-              onClose();
-              onSuggest();
-            }}
+            onClick={() => { onClose(); onSuggest(); }}
           >
             <PlusCircle size={16} /> Suggest a Service
           </button>
 
           {isAdmin && (
-            <button
-              className="user-admin-link"
-              onClick={() => navigate('/admin/dashboard')}
-            >
+            <button className="user-admin-link" onClick={() => navigate('/admin/dashboard')}>
               Admin dashboard →
             </button>
           )}

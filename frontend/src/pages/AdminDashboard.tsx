@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Building2, TrafficCone, LogOut, Loader2, 
-  CheckCircle2, AlertCircle, Check, X, Menu 
+  CheckCircle2, AlertCircle, Check, X, Menu , MapPinned
 } from 'lucide-react';
 import { 
   getMe, 
@@ -242,18 +242,28 @@ export default function AdminDashboard() {
             </>
           )}
 
-          <h3 className="admin-section-title" style={{ marginTop: '40px' }}>Session</h3>
-          <button
-            className="admin-btn danger"
-            onClick={() => {
-              localStorage.removeItem('servicefinder_access_token');
-              localStorage.removeItem('servicefinder_refresh_token');
-              navigate('/admin', { replace: true });
-            }}
-          >
-            <LogOut size={18} />
-            Sign Out
-          </button>
+<h3 className="admin-section-title" style={{ marginTop: '40px' }}>Session</h3>
+
+{/* NEW: Back to Map button */}
+<button
+  className="admin-btn"
+  onClick={() => navigate('/dashboard')}
+>
+  <MapPinned size={18} />
+  Back to Map
+</button>
+
+<button
+  className="admin-btn danger"
+  onClick={() => {
+    localStorage.removeItem('servicefinder_access_token');
+    localStorage.removeItem('servicefinder_refresh_token');
+    navigate('/admin', { replace: true });
+  }}
+>
+  <LogOut size={18} />
+  Sign Out
+</button>
         </div>
       </aside>
 

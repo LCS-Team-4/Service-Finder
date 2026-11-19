@@ -40,8 +40,10 @@ export default function SuggestServiceModal({ onClose, onSuccess }: SuggestServi
         website: form.website.trim() || undefined,
         opening_hours: form.opening_hours.trim() || undefined,
       });
-      onSuccess();
-      onClose();
+      
+      onSuccess(); // Tell the parent it was successful
+      onClose();   // Close the modal
+      
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to submit your suggestion.');
     } finally {

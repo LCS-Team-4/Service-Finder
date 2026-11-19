@@ -7,6 +7,7 @@ const API_BASE_URL = configuredApiUrl.endsWith('/api') ? configuredApiUrl : `${c
 type ApiError = { error?: string };
 
 async function request<T>(path: string, options: RequestInit): Promise<T> {
+  const token = localStorage.getItem('servicefinder_access_token'); 
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
@@ -14,6 +15,7 @@ async function request<T>(path: string, options: RequestInit): Promise<T> {
       cache: 'no-store',
       headers: {
         'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         'ngrok-skip-browser-warning': 'true',
         ...options.headers,
       },

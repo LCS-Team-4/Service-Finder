@@ -4,7 +4,7 @@ import {
   fetchServiceDetails,
   updateServiceDetails,
   findServiceById,
-  createServiceSuggestion,
+  // createServiceSuggestion,
 } from '../models/Service'
 import type { AuthRequest } from '../middleware/auth'
 
@@ -147,9 +147,6 @@ export async function getServicesByStatus(req: Request, res: Response, next: Nex
     const status = typeof req.query.status === 'string' ? req.query.status : undefined
     const limit = Math.min(Math.max(Number(req.query.limit ?? 50), 1), 200)
 
-    console.log(`\n--- [DEBUG] getServicesByStatus ---`)
-    console.log(`[DEBUG] Querying for status: "${status}"`)
-
     // Construct the raw PostgREST URL
     const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/services`)
     url.searchParams.set('select', '*,category:service_categories(id,name,slug,parent_id)')
@@ -171,12 +168,10 @@ export async function getServicesByStatus(req: Request, res: Response, next: Nex
 
     if (!response.ok) {
       const errorText = await response.text()
-      console.log(`[DEBUG] Supabase raw fetch failed: ${response.status} - ${errorText}`)
       throw new Error(`Supabase returned ${response.status}: ${errorText}`)
     }
 
     const data = await response.json()
-    console.log(`[DEBUG] Raw fetch returned ${data?.length ?? 0} rows`)
 
     const enriched = (data ?? []).map((row: any) => ({
       ...row,
@@ -195,29 +190,32 @@ export async function suggestService(req: AuthRequest, res: Response, next: Next
       return res.status(401).json({ message: 'Authentication required to suggest a service' })
     }
 
-    const { name, type, formatted_address, phone, website, opening_hours, latitude, longitude } = req.body
+    const { name, type, formatted_address, phone, website, opening_hours } = req.body
 
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ message: 'A service name is required' })
     }
 
-    const location =
-      typeof latitude === 'number' && typeof longitude === 'number'
-        ? `SRID=4326;POINT(${longitude} ${latitude})`
-        : null
+    // Insert into the NEW service_suggestions table
+    const { data, error } = await supabase
+      .from('service_suggestions')
+      .insert({
+        user_id: req.auth.userId,
+        name: name.trim(),
+        type: type ?? null,
+        formatted_address: formatted_address ?? null,
+        phone: phone ?? null,
+        website: website ?? null,
+        opening_hours: opening_hours ?? null,
+        // DO NOT include 'location' or 'submitted_by' here. Our table doesn't have those columns!
+      })
+      .select()
+      .single()
 
-    const { data, error } = await createServiceSuggestion({
-      name: name.trim(),
-      type: type ?? null,
-      formatted_address: formatted_address ?? null,
-      location,
-      phone: phone ?? null,
-      website: website ?? null,
-      opening_hours: opening_hours ?? null,
-      submitted_by: req.auth.userId,
-    })
+    if (error) {
+      throw error
+    }
 
-    if (error) throw error
     return res.status(201).json({ data })
   } catch (error) {
     next(error)
@@ -231,12 +229,15 @@ export async function getUserSuggestions(req: AuthRequest, res: Response, next: 
     }
 
     const { data, error } = await supabase
-      .from('services')
-      .select('id, name, status, created_at')
-      .eq('submitted_by', req.auth.userId)
+      .from('service_suggestions')
+      .select('*')
+      .eq('user_id', req.auth.userId)
       .order('created_at', { ascending: false })
 
-    if (error) throw error
+    if (error) {
+      throw error
+    }
+    
     res.json(data ?? [])
   } catch (error) {
     next(error)
