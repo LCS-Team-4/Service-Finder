@@ -1,12 +1,14 @@
 import { memo, useState } from 'react';
-import { Bookmark, Clock3, MapPinned, Navigation, Phone, X, Globe, Accessibility } from 'lucide-react';
+import { Bookmark, Clock3, MapPinned, Navigation, Phone, X, Globe, Accessibility, MapPin } from 'lucide-react';
 import { CategoryIcon } from '../common/CategoryIcon';
 import { categoryColor } from '../../utils/constants';
+import { distanceKm, formatDistance } from '../../utils/geo';
 import type { Place } from '../../types/service.types';
 
 interface ServicePopupProps {
   place: Place;
   saved: boolean;
+  userLocation?: { lat: number; lng: number } | null; // <-- ADDED THIS
   onClose: () => void;
   onSave: () => void;
   onGetDirections: () => void;
@@ -15,11 +17,17 @@ interface ServicePopupProps {
 function ServicePopup({
   place,
   saved,
+  userLocation,
   onClose,
   onSave,
   onGetDirections,
 }: ServicePopupProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
+
+  // Calculate distance if we have the user's location
+  const dist = userLocation 
+    ? distanceKm(userLocation, { lat: place.lat, lng: place.lng }) 
+    : null;
 
   return (
     <section className="service-popup">
@@ -42,6 +50,15 @@ function ServicePopup({
           <MapPinned size={17} />
           <span>{place.formatted_address ?? 'Address unavailable'}</span>
         </p>
+        
+        {/* NEW DISTANCE DISPLAY */}
+        {dist !== null && (
+          <p style={{ color: '#8a653d', fontWeight: 600 }}>
+            <Navigation size={17} />
+            <span>{formatDistance(dist)} away</span>
+          </p>
+        )}
+
         {detailsOpen && (
           <>
             {place.opening_hours && (

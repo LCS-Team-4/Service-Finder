@@ -11,6 +11,7 @@ import { useServices } from '../hooks/useServices';
 import { useTrafficIncidents } from '../hooks/useTrafficIncidents';
 import { useWeather } from '../hooks/useWeather';
 import { categoryColor } from '../utils/constants';
+import { getRoute, formatDuration, type RouteResult } from '../services/mapsService';
 import { buildIncidentLegend } from '../services/trafficLegend';
 import { distanceKm, isMobileViewport } from '../utils/geo';
 import { ScrollHint } from '../components/common/ScrollHint';
@@ -87,6 +88,8 @@ export default function Home() {
   const [tracking, setTracking] = useState(false);
   const [satellite, setSatellite] = useState(false);
   const [routeTarget, setRouteTarget] = useState<Place | null>(null);
+  const [route, setRoute] = useState<RouteResult | null>(null);
+  const [isRouting, setIsRouting] = useState(false);
   const [searchLocationStatus, setSearchLocationStatus] = useState<'idle' | 'locating' | 'unavailable'>('idle');
   const [radiusKm, setRadiusKm] = useState<number | null>(5);
   const [hiddenIncidents, setHiddenIncidents] = useState<Set<number | null>>(() => new Set());
@@ -190,7 +193,7 @@ export default function Home() {
             lat: position.coords.latitude,
             lng: position.coords.longitude,
             accuracy: position.coords.accuracy,
-          };+
+          };
           setUserLocation(location);
           resolve(location);
         },
@@ -272,13 +275,8 @@ export default function Home() {
     [incidents, hiddenIncidents, userLocation, radiusKm],
   );
 
-  const routeDistance = useMemo(() => {
-    if (!userLocation || !routeTarget) return null;
-    return distanceKm(
-      { lat: userLocation.lat, lng: userLocation.lng },
-      { lat: routeTarget.lat, lng: routeTarget.lng },
-    ).toFixed(1);
-  }, [userLocation, routeTarget]);
+  const routeDistance = route ? (route.distanceMeters / 1000).toFixed(1) : null;
+  const routeEta = route ? formatDuration(route.durationSeconds) : null;
 
   const toggleIncident = useCallback((code: number | null) => {
     setHiddenIncidents((current) => {
@@ -334,22 +332,45 @@ export default function Home() {
     setNotice(first ? `${results.length} place${results.length === 1 ? '' : 's'} found` : 'No places found');
   };
 
-  const getDirections = useCallback(async (place: Place) => {
-    let origin = userLocation;
-    if (!origin) {
-      setNotice('Getting your current location for directions...');
-      try {
-        origin = await requestCurrentLocation();
-      } catch (error) {
-        setNotice(error instanceof Error ? error.message : 'Unable to get your current location.');
-        return;
-      }
+const getDirections = useCallback(async (place: Place) => {
+  let origin = userLocation;
+  if (!origin) {
+    setNotice('Getting your current location for directions...');
+    try {
+      origin = await requestCurrentLocation();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Unable to get your current location.');
+      return;
     }
+  }
 
-    mapRef.current?.flyTo([origin.lat, origin.lng], 18, { animate: true, duration: 0.7 });
-    setSelected(null);
-    setRouteTarget(place);
-    setNotice(`Getting road directions to ${place.name}...`);
+  setSelected(null);
+  setRouteTarget(place);
+  setRoute(null);
+  setIsRouting(true);
+  setNotice(`Calculating route to ${place.name}...`);
+
+  const result = await getRoute(origin, { lat: place.lat, lng: place.lng });
+  setIsRouting(false);
+
+  if (!result) {
+    setNotice('Could not find a route. Try a different destination.');
+    setRouteTarget(null);
+    return;
+  }
+
+  setRoute(result);
+  setNotice(`Route found: ${(result.distanceMeters / 1000).toFixed(1)} km, ${formatDuration(result.durationSeconds)}`);
+  
+  // Optionally zoom the map to fit the whole route
+  if (result.geometry.length > 0 && mapRef.current) {
+    const lats = result.geometry.map(([lat]) => lat);
+    const lngs = result.geometry.map(([, lng]) => lng);
+    mapRef.current.fitBounds([
+      [Math.min(...lats), Math.min(...lngs)],
+      [Math.max(...lats), Math.max(...lngs)],
+    ], { padding: [50, 50] });
+  }
   }, [userLocation, requestCurrentLocation]);
 
   const selectSuggestion = (place: Place) => {
@@ -465,14 +486,14 @@ export default function Home() {
     <main className={`guide-shell ${routeTarget ? 'is-routing' : ''}`}>
       <div className="map-stage">
         <LeafletMap
-          places={routeTarget ? [routeTarget] : visible}
+          places={visible} 
           selected={selected}
           onSelect={selectPlace}
           mapRef={mapRef}
           satellite={satellite}
           userLocation={userLocation}
           incidents={visibleIncidents}
-          routeTarget={routeTarget}
+          routePath={route?.geometry ?? null}
           onMapMoving={setIsMapMoving}
         />
 
@@ -513,23 +534,24 @@ export default function Home() {
           <ServicePopup
             place={selected}
             saved={saved.includes(selected.name)}
+            userLocation={userLocation}
             onClose={handleClosePopup}
             onSave={handleSaveSelected}
             onGetDirections={handleDirectionsForSelected}
           />
         )}
 
-        {routeTarget && (
-          <div className="route-actions-wrapper">
-            <button
-              className="clear-route"
-              onClick={() => {
+          {routeTarget && (
+            <div className="route-actions-wrapper">
+              <button className="clear-route" onClick={() => {
                 if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
                 watchId.current = null;
                 hasCentered.current = false;
                 setTracking(false);
                 setUserLocation(null);
                 setRouteTarget(null);
+                setRoute(null);        
+                setIsRouting(false); 
                 setSelected(null);
                 setQuery('');
                 setActive(new Set());
@@ -540,10 +562,16 @@ export default function Home() {
             >
               Clear route
             </button>
-            {routeDistance && (
+            {isRouting && (
+              <div className="route-distance">Calculating…</div>
+            )}
+            {!isRouting && routeDistance && routeEta && (
               <div className="route-distance">
-                {routeDistance} km away
+                {routeDistance} km · {routeEta}
               </div>
+            )}
+            {!isRouting && !routeDistance && (
+              <div className="route-distance">No route found</div>
             )}
           </div>
         )}
@@ -556,35 +584,6 @@ export default function Home() {
         />
 
         {/* Desktop-only standalone buttons (visible on wide screens) */}
-        <button
-          type="button"
-          className="panel-trigger about-trigger desktop-only"
-          onClick={() => {
-            setAboutOpen((open) => !open);
-            setLegendOpen(false);
-          }}
-        >
-          <BookOpen size={17} /> About
-        </button>
-        <button
-          className="panel-trigger legend-trigger desktop-only"
-          onClick={() => {
-            setLegendOpen((open) => !open);
-            setAboutOpen(false);
-          }}
-        >
-          <MapPinned size={17} /> Legend
-        </button>
-        <button
-          type="button"
-          className="panel-trigger user-trigger desktop-only"
-          onClick={() => setUserMenuOpen(true)}
-          aria-label="Open user menu"
-        >
-          <User size={17} /> Account
-        </button>
-
-                {/* Desktop standalone buttons */}
         <button
           type="button"
           className="panel-trigger about-trigger desktop-only"
@@ -775,7 +774,7 @@ export default function Home() {
           onSuggest={() => setSuggestOpen(true)}
         />
 
-                {suggestOpen && (
+        {suggestOpen && (
           <SuggestServiceModal
             onClose={() => setSuggestOpen(false)}
             onSuccess={() => {

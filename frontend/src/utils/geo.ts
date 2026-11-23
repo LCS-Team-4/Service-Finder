@@ -13,6 +13,13 @@ export function distanceKm(
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
+export function formatDistance(km: number | undefined | null): string {
+  if (km == null) return '';
+  if (km < 1) return `${Math.round(km * 1000)} m`;
+  if (km < 10) return `${km.toFixed(1)} km`;
+  return `${Math.round(km)} km`;
+}
+
 export function isMobileViewport(): boolean {
   if (typeof window === 'undefined') return false;
   return window.matchMedia('(max-width: 780px)').matches;
