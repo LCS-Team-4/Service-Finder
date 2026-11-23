@@ -2600,3 +2600,25 @@ a {
 		width: 88vw;
 	}
 }
+
+.travel-mode-toggles .mode-btn {
+	background: transparent;
+	border: 1px solid #8c6337;
+	color: #8c6337;
+	border-radius: 4px;
+	padding: 8px;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: all 0.2s;
+}
+
+.travel-mode-toggles .mode-btn:hover {
+	background: #f4d18c;
+}
+
+.travel-mode-toggles .mode-btn.active {
+	background: #8c6337;
+	color: #fdf2d0;
+}

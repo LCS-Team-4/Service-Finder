@@ -40,3 +40,11 @@ export type Place = Omit<Service, 'category'> & {
   lat: number;
   lng: number;
 };
+
+export type TravelMode = 'driving' | 'walking' | 'cycling';
+
+export interface RouteResult {
+  distanceMeters: number;
+  durationSeconds: number;
+  geometry: [number, number][]; // [lat, lng]
+}

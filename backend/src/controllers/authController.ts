@@ -21,15 +21,22 @@ export async function login(req: Request, res: Response) {
 		return res.status(400).json({ error: 'Email and password are required.' })
 	}
 
-	const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-	if (error || !data.session || !data.user) {
-		return res.status(401).json({ error: error?.message || 'Invalid email or password.' })
-	}
+	try {
+		const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+		
+		if (error || !data.session || !data.user) {
+			console.error("🔍 [AUTH LOGIN ERROR]:", error?.message);
+			return res.status(401).json({ error: error?.message || 'Invalid email or password.' })
+		}
 
-	return res.json({
-		user: { id: data.user.id, email: data.user.email },
-		session: data.session,
-	})
+		return res.json({
+			user: { id: data.user.id, email: data.user.email },
+			session: data.session,
+		})
+	} catch (err: any) {
+		console.error("🔍 [AUTH CRITICAL ERROR]:", err.message);
+		return res.status(500).json({ error: err.message })
+	}
 }
 
 export async function signup(req: Request, res: Response) {

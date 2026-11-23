@@ -10,13 +10,6 @@ declare const L: any;
 
 const MAX_MARKERS_IN_VIEW = 200;
 
-/**
- * Parse a traffic incident's geometry into [lng, lat] pairs.
- * Handles three formats the backend might produce:
- *  - GeoJSON object with coordinates array
- *  - WKT string: "LINESTRING(lng lat, lng lat, ...)"
- *  - WKB hex string (PostGIS binary)
- */
 export const parseIncidentGeometry = (geometry: unknown): [number, number][] => {
   if (geometry && typeof geometry === 'object' && 'coordinates' in geometry) {
     const coords = (geometry as { coordinates?: unknown }).coordinates;
@@ -67,7 +60,9 @@ interface LeafletMapProps {
   satellite: boolean;
   userLocation: { lat: number; lng: number; accuracy: number } | null;
   incidents: TrafficIncident[];
-  routeTarget: Place | null;
+  routePath?: [number, number][] | null;  // <-- changed from routeTarget
+  fitRouteBounds?: boolean;              // <-- new: let Home tell the map to zoom to route
+  routeTarget?: Place | null;    
   onMapMoving?: (moving: boolean) => void;
 }
 
@@ -79,7 +74,9 @@ function LeafletMap({
   satellite,
   userLocation,
   incidents,
-  routeTarget,
+  routePath = null,  
+  fitRouteBounds = false,
+  routeTarget, 
   onMapMoving,
 }: LeafletMapProps) {
   const root = useRef<HTMLDivElement>(null);
@@ -107,7 +104,6 @@ function LeafletMap({
     if (!map || !layer.current) return;
 
     const bounds = map.getBounds();
-
     layer.current.clearLayers();
 
     let shown = 0;
@@ -166,7 +162,7 @@ function LeafletMap({
     }
   }, [mapRef]);
 
-  // 1. Map setup
+  // Map setup
   useEffect(() => {
     if (!root.current || !L) return;
     const map = L.map(root.current, { zoomControl: false, attributionControl: true })
@@ -179,8 +175,6 @@ function LeafletMap({
     layer.current = L.layerGroup().addTo(map);
     incidentLayer.current = L.layerGroup().addTo(map);
 
-    // PERF: ResizeObserver keeps the map in sync with its container size,
-    // replacing the fragile `setTimeout(invalidateSize, 0)`.
     const ro = new ResizeObserver(() => map.invalidateSize());
     if (root.current) ro.observe(root.current);
 
@@ -226,9 +220,6 @@ function LeafletMap({
     tileLayer.current.addTo(map);
   }, [mapRef, satellite]);
 
-  // 2. Re-render when the data changes
-  // PERF: `selected` deliberately removed — clicking a marker no longer rebuilds
-  // the entire layer. Selection is handled by the popup, not by the markers.
   useEffect(() => {
     renderMarkersInView();
   }, [places, renderMarkersInView]);
@@ -237,7 +228,7 @@ function LeafletMap({
     renderIncidentsInView();
   }, [incidents, renderIncidentsInView]);
 
-  // 3. Center on user once
+  // Center on user once
   const hasCenteredOnUser = useRef(false);
   useEffect(() => {
     if (!userLocation || !mapRef.current) return;
@@ -249,7 +240,7 @@ function LeafletMap({
     });
   }, [userLocation, mapRef]);
 
-  // 4. Live user marker
+  // Live user marker
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !L) return;
@@ -274,12 +265,13 @@ function LeafletMap({
     }
   }, [userLocation, mapRef]);
 
-  // 5. OSRM route
+  // === Render pre-computed route polyline ===
+  // This component no longer fetches OSRM. Home.tsx handles that.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !L) return;
 
-    if (!userLocation || !routeTarget) {
+    if (!routePath || routePath.length < 2) {
       if (routeLine.current) {
         map.removeLayer(routeLine.current);
         routeLine.current = null;
@@ -288,74 +280,32 @@ function LeafletMap({
       return;
     }
 
-    const key = `${routeTarget.lat.toFixed(4)},${routeTarget.lng.toFixed(4)}|${userLocation.lat.toFixed(3)},${userLocation.lng.toFixed(3)}`;
-    if (key === lastRouteKey.current && routeLine.current) return;
+    // Only redraw if the path actually changed
+    const key = `${routePath.length}|${routePath[0][0].toFixed(4)},${routePath[0][1].toFixed(4)}|${routePath[routePath.length - 1][0].toFixed(4)},${routePath[routePath.length - 1][1].toFixed(4)}`;
+    if (key === lastRouteKey.current && routeLine.current) {
+      if (fitRouteBounds) {
+        map.fitBounds(routePath as [number, number][], { padding: [50, 50] });
+      }
+      return;
+    }
     lastRouteKey.current = key;
 
-    const controller = new AbortController();
-    const from = `${userLocation.lng},${userLocation.lat}`;
-    const to = `${routeTarget.lng},${routeTarget.lat}`;
-    const url = `https://router.project-osrm.org/route/v1/driving/${from};${to}?overview=full&geometries=geojson`;
+    if (!routeLine.current) {
+      routeLine.current = L.polyline(routePath, {
+        color: '#1f9450',
+        weight: 5,
+        opacity: 0.9,
+        lineJoin: 'round',
+        lineCap: 'round',
+      }).addTo(map);
+    } else {
+      routeLine.current.setLatLngs(routePath);
+    }
 
-    fetch(url, { signal: controller.signal })
-      .then((res) => {
-        if (!res.ok) throw new Error('Routing request failed');
-        return res.json();
-      })
-      .then((data) => {
-        if (controller.signal.aborted) return;
-        const coords =
-          data?.routes?.[0]?.geometry?.coordinates?.map(
-            (c: [number, number]) => [c[1], c[0]] as [number, number],
-          ) ?? null;
-
-        const latlngs: [number, number][] =
-          coords && coords.length > 1
-            ? coords
-            : [
-                [userLocation.lat, userLocation.lng],
-                [routeTarget.lat, routeTarget.lng],
-              ];
-
-        if (!routeLine.current) {
-          routeLine.current = L.polyline(latlngs, {
-            color: '#1f9450',
-            weight: 5,
-            opacity: 0.9,
-          }).addTo(map);
-        } else {
-          routeLine.current.setLatLngs(latlngs);
-        }
-
-        map.flyTo([userLocation.lat, userLocation.lng], 18, {
-          animate: true,
-          duration: 0.7,
-        });
-      })
-      .catch((err) => {
-        if (err?.name === 'AbortError') return;
-        const latlngs: [number, number][] = [
-          [userLocation.lat, userLocation.lng],
-          [routeTarget.lat, routeTarget.lng],
-        ];
-        if (!routeLine.current) {
-          routeLine.current = L.polyline(latlngs, {
-            color: '#1f9450',
-            weight: 5,
-            opacity: 0.9,
-            dashArray: '8 10',
-          }).addTo(map);
-        } else {
-          routeLine.current.setLatLngs(latlngs);
-        }
-        map.flyTo([userLocation.lat, userLocation.lng], 18, {
-          animate: true,
-          duration: 0.7,
-        });
-      });
-
-    return () => controller.abort();
-  }, [userLocation, routeTarget, mapRef]);
+    if (fitRouteBounds) {
+      map.fitBounds(routePath as [number, number][], { padding: [50, 50] });
+    }
+  }, [routePath, fitRouteBounds, mapRef]);
 
   return <div className="leaflet-map" ref={root} />;
 }

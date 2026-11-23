@@ -1,3 +1,36 @@
+import type { Service } from '../types/service.types';
+
+/**
+ * Parses a PostGIS Point string, GeoJSON object, or coordinate tuple into [lat, lng].
+ */
+export function getCoordinates(location: any): [number, number] | null {
+  if (!location) return null;
+
+  // 1. Tuple: [lng, lat]
+  if (Array.isArray(location) && location.length >= 2) {
+    const [lng, lat] = location;
+    if (typeof lat === 'number' && typeof lng === 'number') return [lat, lng];
+  }
+
+  // 2. GeoJSON object: { coordinates: [lng, lat] }
+  if (typeof location === 'object' && location.coordinates) {
+    const [lng, lat] = location.coordinates;
+    if (typeof lat === 'number' && typeof lng === 'number') return [lat, lng];
+  }
+
+  // 3. PostGIS WKT string: "SRID=4326;POINT(lng lat)"
+  if (typeof location === 'string') {
+    const match = location.match(/POINT\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)/i);
+    if (match) {
+      const lng = Number(match[1]);
+      const lat = Number(match[2]);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) return [lat, lng];
+    }
+  }
+
+  return null;
+}
+
 export function distanceKm(
   a: { lat: number; lng: number },
   b: { lat: number; lng: number },
@@ -13,54 +46,24 @@ export function distanceKm(
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
+export function formatDistance(km: number | undefined | null): string {
+  if (km == null) return '';
+  if (km < 1) return `${Math.round(km * 1000)} m`;
+  if (km < 10) return `${km.toFixed(1)} km`;
+  return `${Math.round(km)} km`;
+}
+
 export function isMobileViewport(): boolean {
   if (typeof window === 'undefined') return false;
   return window.matchMedia('(max-width: 780px)').matches;
 }
 
-/**
- * Turn whatever Supabase/PostgREST gives us for a `geography(Point)` column
- * into [lng, lat]. Handles:
- *   - GeoJSON object   { coordinates: [lng, lat] }
- *   - WKT / EWKT       "SRID=4326;POINT(lng lat)"
- *   - EWKB hex string  "0101000020E6100000..."   <- what PostgREST returns by default
- */
-export function getCoordinates(location: unknown): [number, number] | null {
-  if (location && typeof location === 'object' && 'coordinates' in location) {
-    const c = (location as { coordinates?: unknown }).coordinates;
-    if (Array.isArray(c) && c.length >= 2 && Number.isFinite(c[0]) && Number.isFinite(c[1])) {
-      return [Number(c[0]), Number(c[1])];
-    }
-    return null;
-  }
-  if (typeof location !== 'string') return null;
-
-  const wkt = location.match(/(?:SRID=\d+;)?\s*POINT\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)/i);
-  if (wkt) return [Number(wkt[1]), Number(wkt[2])];
-
-  if (!/^[0-9a-f]+$/i.test(location) || location.length < 34) return null;
-  const bytes = new Uint8Array(location.match(/.{2}/g)!.map((pair) => parseInt(pair, 16)));
-  const littleEndian = bytes[0] === 1;
-  const view = new DataView(bytes.buffer);
-  const geometryType = view.getUint32(1, littleEndian);
-  const coordinateOffset = 5 + (geometryType & 0x20000000 ? 4 : 0);
-  if ((geometryType & 0xff) !== 1 || bytes.length < coordinateOffset + 16) return null;
-  const lng = view.getFloat64(coordinateOffset, littleEndian);
-  const lat = view.getFloat64(coordinateOffset + 8, littleEndian);
-  return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
-}
-
-// Appended to address searches so "19 Crescent Street" doesn't resolve to a
-// different country. Change this if the app ever covers another region.
-const REGION_HINT = 'Cape Town, South Africa';
-
-/** Google Maps search for a typed address — quick "does this place exist?" check. */
+/** Generates a Google Maps URL that opens the address in a new tab. */
 export function googleMapsAddressUrl(address: string): string {
-  const query = /cape town/i.test(address) ? address : `${address}, ${REGION_HINT}`;
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
 }
 
-/** Google Maps pointing at an exact coordinate. */
+/** Generates a Google Maps URL that drops a pin at exact coordinates. */
 export function googleMapsPinUrl(lat: number, lng: number): string {
   return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
 }

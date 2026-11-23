@@ -1,5 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, Layers, MapPinned, Minus, Plus, X, LocateFixed, User } from 'lucide-react';
+import { BookOpen, Layers, MapPinned, Minus, Plus, X, LocateFixed, User, Car, Bike, Footprints } from 'lucide-react';
 import LeafletMap, { parseIncidentGeometry } from '../components/Map/LeafletMap';
 import WeatherWidget from '../components/Map/WeatherWidget';
 import GuideSearch from '../components/SearchBar/GuideSearch';
@@ -11,6 +11,8 @@ import { useServices } from '../hooks/useServices';
 import { useTrafficIncidents } from '../hooks/useTrafficIncidents';
 import { useWeather } from '../hooks/useWeather';
 import { categoryColor } from '../utils/constants';
+import { getRoute, formatDuration } from '../services/mapsService';
+import type { TravelMode } from '../types/service.types';
 import { buildIncidentLegend } from '../services/trafficLegend';
 import { distanceKm, isMobileViewport } from '../utils/geo';
 import { ScrollHint } from '../components/common/ScrollHint';
@@ -86,7 +88,13 @@ export default function Home() {
   const { incidents } = useTrafficIncidents(Boolean(userLocation));
   const [tracking, setTracking] = useState(false);
   const [satellite, setSatellite] = useState(false);
+  
+  // ROUTING STATE
   const [routeTarget, setRouteTarget] = useState<Place | null>(null);
+  const [route, setRoute] = useState<any>(null);
+  const [isRouting, setIsRouting] = useState(false);
+  const [travelMode, setTravelMode] = useState<TravelMode>('driving'); // <-- NEW STATE
+
   const [searchLocationStatus, setSearchLocationStatus] = useState<'idle' | 'locating' | 'unavailable'>('idle');
   const [radiusKm, setRadiusKm] = useState<number | null>(5);
   const [hiddenIncidents, setHiddenIncidents] = useState<Set<number | null>>(() => new Set());
@@ -190,7 +198,7 @@ export default function Home() {
             lat: position.coords.latitude,
             lng: position.coords.longitude,
             accuracy: position.coords.accuracy,
-          };+
+          };
           setUserLocation(location);
           resolve(location);
         },
@@ -272,13 +280,8 @@ export default function Home() {
     [incidents, hiddenIncidents, userLocation, radiusKm],
   );
 
-  const routeDistance = useMemo(() => {
-    if (!userLocation || !routeTarget) return null;
-    return distanceKm(
-      { lat: userLocation.lat, lng: userLocation.lng },
-      { lat: routeTarget.lat, lng: routeTarget.lng },
-    ).toFixed(1);
-  }, [userLocation, routeTarget]);
+  const routeDistance = route ? (route.distanceMeters / 1000).toFixed(1) : null;
+  const routeEta = route ? formatDuration(route.durationSeconds) : null;
 
   const toggleIncident = useCallback((code: number | null) => {
     setHiddenIncidents((current) => {
@@ -334,6 +337,32 @@ export default function Home() {
     setNotice(first ? `${results.length} place${results.length === 1 ? '' : 's'} found` : 'No places found');
   };
 
+  // 1. EXTRACTED ROUTE FETCHING
+  const fetchRoute = useCallback(async (from: {lat: number, lng: number}, to: Place, mode: TravelMode) => {
+    setIsRouting(true);
+    setNotice(`Calculating ${mode} route to ${to.name}...`);
+    
+    const result = await getRoute(from, { lat: to.lat, lng: to.lng }, mode);
+    setIsRouting(false);
+
+    if (!result) {
+      setNotice('Could not find a route. Try a different mode.');
+      return;
+    }
+
+    setRoute(result);
+    setNotice(`Route found: ${(result.distanceMeters / 1000).toFixed(1)} km, ${formatDuration(result.durationSeconds)}`);
+    
+    if (result.geometry.length > 0 && mapRef.current) {
+      const lats = result.geometry.map(([lat]) => lat);
+      const lngs = result.geometry.map(([, lng]) => lng);
+      mapRef.current.fitBounds([
+        [Math.min(...lats), Math.min(...lngs)],
+        [Math.max(...lats), Math.max(...lngs)],
+      ], { padding: [50, 50] });
+    }
+  }, []);
+
   const getDirections = useCallback(async (place: Place) => {
     let origin = userLocation;
     if (!origin) {
@@ -346,11 +375,20 @@ export default function Home() {
       }
     }
 
-    mapRef.current?.flyTo([origin.lat, origin.lng], 18, { animate: true, duration: 0.7 });
     setSelected(null);
     setRouteTarget(place);
-    setNotice(`Getting road directions to ${place.name}...`);
-  }, [userLocation, requestCurrentLocation]);
+    setRoute(null);
+    await fetchRoute(origin, place, travelMode);
+  }, [userLocation, requestCurrentLocation, travelMode, fetchRoute]);
+
+  // 2. HANDLER TO SWITCH MODES ON THE FLY
+  const handleModeChange = (newMode: TravelMode) => {
+    setTravelMode(newMode);
+    if (routeTarget && userLocation) {
+      setRoute(null); // Clear old route
+      void fetchRoute(userLocation, routeTarget, newMode); // Fetch new route instantly
+    }
+  };
 
   const selectSuggestion = (place: Place) => {
     setQuery(place.name);
@@ -422,12 +460,6 @@ export default function Home() {
     );
   };
 
-  const toggleSave = (name: string) => {
-    setSaved((current) =>
-      current.includes(name) ? current.filter((n) => n !== name) : [...current, name],
-    );
-  };
-
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(''), 4000);
@@ -465,14 +497,14 @@ export default function Home() {
     <main className={`guide-shell ${routeTarget ? 'is-routing' : ''}`}>
       <div className="map-stage">
         <LeafletMap
-          places={routeTarget ? [routeTarget] : visible}
+          places={visible} 
           selected={selected}
           onSelect={selectPlace}
           mapRef={mapRef}
           satellite={satellite}
           userLocation={userLocation}
           incidents={visibleIncidents}
-          routeTarget={routeTarget}
+          routePath={route?.geometry ?? null}
           onMapMoving={setIsMapMoving}
         />
 
@@ -513,37 +545,71 @@ export default function Home() {
           <ServicePopup
             place={selected}
             saved={saved.includes(selected.name)}
+            userLocation={userLocation}
             onClose={handleClosePopup}
             onSave={handleSaveSelected}
             onGetDirections={handleDirectionsForSelected}
           />
         )}
 
+        {/* ROUTE UI WITH TRAVEL MODE BUTTONS */}
         {routeTarget && (
           <div className="route-actions-wrapper">
-            <button
-              className="clear-route"
-              onClick={() => {
-                if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
-                watchId.current = null;
-                hasCentered.current = false;
-                setTracking(false);
-                setUserLocation(null);
-                setRouteTarget(null);
-                setSelected(null);
-                setQuery('');
-                setActive(new Set());
-                setRadiusKm(null);
-                mapRef.current?.flyTo([-33.96, 18.5], 11, { animate: true, duration: 0.8 });
-                setNotice('Route cleared. Showing all services.');
-              }}
-            >
+            <button className="clear-route" onClick={() => {
+              if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current);
+              watchId.current = null;
+              hasCentered.current = false;
+              setTracking(false);
+              setUserLocation(null);
+              setRouteTarget(null);
+              setRoute(null);        
+              setIsRouting(false); 
+              setSelected(null);
+              setQuery('');
+              setActive(new Set());
+              setRadiusKm(null);
+              setTravelMode('driving'); // <-- Reset to default when cleared
+              mapRef.current?.flyTo([-33.96, 18.5], 11, { animate: true, duration: 0.8 });
+              setNotice('Route cleared. Showing all services.');
+            }}>
               Clear route
             </button>
-            {routeDistance && (
+            
+            {/* NEW TRAVEL MODE BUTTONS */}
+            <div className="travel-mode-toggles" style={{ display: 'flex', gap: '8px', margin: '0 10px' }}>
+              <button 
+                className={`mode-btn ${travelMode === 'driving' ? 'active' : ''}`} 
+                onClick={() => handleModeChange('driving')}
+                title="Driving"
+              >
+                <Car size={16} />
+              </button>
+              <button 
+                className={`mode-btn ${travelMode === 'walking' ? 'active' : ''}`} 
+                onClick={() => handleModeChange('walking')}
+                title="Walking"
+              >
+                <Footprints size={16} />
+              </button>
+              <button 
+                className={`mode-btn ${travelMode === 'cycling' ? 'active' : ''}`} 
+                onClick={() => handleModeChange('cycling')}
+                title="Cycling"
+              >
+                <Bike size={16} />
+              </button>
+            </div>
+
+            {isRouting && (
+              <div className="route-distance">Calculating…</div>
+            )}
+            {!isRouting && routeDistance && routeEta && (
               <div className="route-distance">
-                {routeDistance} km away
+                {routeDistance} km · {routeEta}
               </div>
+            )}
+            {!isRouting && !routeDistance && (
+              <div className="route-distance">No route found</div>
             )}
           </div>
         )}
@@ -556,35 +622,6 @@ export default function Home() {
         />
 
         {/* Desktop-only standalone buttons (visible on wide screens) */}
-        <button
-          type="button"
-          className="panel-trigger about-trigger desktop-only"
-          onClick={() => {
-            setAboutOpen((open) => !open);
-            setLegendOpen(false);
-          }}
-        >
-          <BookOpen size={17} /> About
-        </button>
-        <button
-          className="panel-trigger legend-trigger desktop-only"
-          onClick={() => {
-            setLegendOpen((open) => !open);
-            setAboutOpen(false);
-          }}
-        >
-          <MapPinned size={17} /> Legend
-        </button>
-        <button
-          type="button"
-          className="panel-trigger user-trigger desktop-only"
-          onClick={() => setUserMenuOpen(true)}
-          aria-label="Open user menu"
-        >
-          <User size={17} /> Account
-        </button>
-
-                {/* Desktop standalone buttons */}
         <button
           type="button"
           className="panel-trigger about-trigger desktop-only"
