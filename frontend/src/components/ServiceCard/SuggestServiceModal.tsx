@@ -7,6 +7,9 @@ interface SuggestServiceModalProps {
   onSuccess: () => void;
 }
 
+// Dev-only: lets you exercise the whole submit -> review flow with junk data.
+const TEST_VALUE = '010101010';
+
 export default function SuggestServiceModal({ onClose, onSuccess }: SuggestServiceModalProps) {
   const [form, setForm] = useState({
     name: '',
@@ -22,6 +25,18 @@ export default function SuggestServiceModal({ onClose, onSuccess }: SuggestServi
   function update<K extends keyof typeof form>(field: K, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
     if (error) setError('');
+  }
+
+  function fillTestData() {
+    setForm({
+      name: TEST_VALUE,
+      type: TEST_VALUE,
+      formatted_address: TEST_VALUE,
+      phone: TEST_VALUE,
+      website: TEST_VALUE,
+      opening_hours: TEST_VALUE,
+    });
+    setError('');
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -69,6 +84,16 @@ export default function SuggestServiceModal({ onClose, onSuccess }: SuggestServi
 
         <form onSubmit={handleSubmit} noValidate>
           {error && <p className="form-error" role="alert">{error}</p>}
+
+          {import.meta.env.DEV && (
+            <button
+              type="button"
+              onClick={fillTestData}
+              style={{ background: 'transparent', border: 0, padding: 0, marginBottom: 8, fontSize: 12, color: '#8b5a2b', textDecoration: 'underline', cursor: 'pointer' }}
+            >
+              Fill with test data (dev only)
+            </button>
+          )}
 
           <label className="field-label" htmlFor="suggest-name">Service name *</label>
           <input

@@ -1,24 +1,27 @@
 import { createClient } from '@supabase/supabase-js'
 import dotenv from 'dotenv'
+
 dotenv.config()
 
 const supabaseUrl = process.env.SUPABASE_URL
-const supabaseKey = process.env.SUPABASE_SERVICE_KEY
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY
 
-if (!supabaseUrl) throw new Error('SUPABASE_URL is not configured')
-if (!supabaseKey) throw new Error('SUPABASE_SERVICE_KEY is not configured')
+const supabasePublishableKey = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY
 
-export const supabaseAuthConfig = { url: supabaseUrl, key: supabaseKey }
+if (!supabaseUrl || !supabaseServiceKey) {
+  throw new Error('Missing Supabase backend environment variables')
+}
 
-// Service-role client — used for all database queries.
-// persistSession: false ensures it will NEVER attach a user session.
-export const supabase = createClient(supabaseUrl, supabaseKey, {
+// 1. Main client (Service Role - bypasses RLS for admin actions)
+export const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   auth: {
-    persistSession: false,
     autoRefreshToken: false,
-    detectSessionInUrl: false,
-    storageKey: 'sb-service-role-no-session', // unique key to prevent shared state
-  },
+    persistSession: false
+  }
 })
 
-export const supabaseAdmin = supabase
+// 2. Auth config (restores the export that authController.ts needs)
+export const supabaseAuthConfig = {
+  url: supabaseUrl,
+  key: supabasePublishableKey || supabaseServiceKey
+}

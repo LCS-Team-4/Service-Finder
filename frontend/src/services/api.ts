@@ -4,7 +4,8 @@ import type { TrafficIncident } from '../types/traffic.types';
 const configuredApiUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '');
 const API_BASE_URL = configuredApiUrl.endsWith('/api') ? configuredApiUrl : `${configuredApiUrl}/api`;
 
-type ApiError = { error?: string };
+// The backend uses `error`; `message` is accepted too so older responses still display properly.
+type ApiError = { error?: string; message?: string };
 
 async function request<T>(path: string, options: RequestInit): Promise<T> {
   let response: Response;
@@ -37,7 +38,7 @@ async function request<T>(path: string, options: RequestInit): Promise<T> {
   }
 
   const payload = await response.json() as T & ApiError;
-  if (!response.ok) throw new Error(payload.error || 'Something went wrong.');
+  if (!response.ok) throw new Error(payload.error || payload.message || 'Something went wrong.');
   return payload;
 }
 
@@ -143,6 +144,8 @@ export function suggestService(payload: {
 // =========================================
 // ADMIN
 // =========================================
+export type ServiceStatus = 'pending' | 'approved' | 'rejected' | 'archived';
+
 export type AdminService = {
   id: string;
   name: string;
@@ -156,12 +159,20 @@ export type AdminService = {
   phone: string | null;
   website: string | null;
   opening_hours: string | null;
+  wheelchair: string | null;
 };
 
-export function getServicesByStatus(status: string) {
+export function getServicesByStatus(
+  status: ServiceStatus | 'all',
+  options?: { q?: string; missingLocation?: boolean; limit?: number },
+) {
   const token = localStorage.getItem('servicefinder_access_token');
   if (!token) return Promise.reject(new Error('No token'));
-  return request<AdminService[]>(`/services/by-status?status=${status}`, {
+  const search = new URLSearchParams({ status });
+  if (options?.q) search.set('q', options.q);
+  if (options?.missingLocation) search.set('missing_location', 'true');
+  if (options?.limit) search.set('limit', String(options.limit));
+  return request<AdminService[]>(`/services/by-status?${search.toString()}`, {
     method: 'GET',
     headers: authHeaders(),
   });
@@ -169,7 +180,7 @@ export function getServicesByStatus(status: string) {
 
 export function updateServiceStatus(
   id: string,
-  status: 'approved' | 'rejected' | 'pending',
+  status: ServiceStatus,
   review_note?: string,
 ) {
   const token = localStorage.getItem('servicefinder_access_token');
@@ -181,13 +192,17 @@ export function updateServiceStatus(
   });
 }
 
+/**
+ * Edit any service at any status. Send only what changed.
+ * `location` is "SRID=4326;POINT(lng lat)"; pass null to clear it.
+ */
 export function updateServiceFields(
   id: string,
   payload: {
     name?: string;
-    type?: string;
-    formatted_address?: string;
-    location?: string;
+    type?: string | null;
+    formatted_address?: string | null;
+    location?: string | null;
     opening_hours?: string | null;
     phone?: string | null;
     website?: string | null;
@@ -228,7 +243,7 @@ export type UserSuggestion = {
   id: string;
   name: string;
   type: string | null;
-  status: 'pending' | 'approved' | 'rejected' | string;
+  status: 'pending' | 'approved' | 'rejected' | 'archived' | string;
   created_at: string;
   review_note: string | null;
 };
@@ -241,4 +256,3 @@ export function getMySuggestions() {
     headers: authHeaders(),
   });
 }
-

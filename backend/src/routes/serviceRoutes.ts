@@ -15,6 +15,6 @@ router.get('/', getServices);
 router.get('/by-status', authenticateToken, requireAdmin, getServicesByStatus);
 router.get('/mine', authenticateToken, getMySuggestions);
 router.post('/suggest', authenticateToken, suggestService);
-router.patch('/:id', authenticateToken, requireAdmin, updateService);
+router.patch('/:id', authenticateToken, requireAdmin, updateService);  // ← renamed
 
 export default router;

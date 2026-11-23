@@ -1,12 +1,114 @@
 import { NextFunction, Request, Response } from "express";
 import { supabase } from "../config/supabase";
-import {
-  fetchServiceDetails,
-  updateServiceDetails,
-  findServiceById,
-  createServiceSuggestion,
-} from "../models/Service";
+import { fetchServiceDetails } from "../models/Service";
 import type { AuthRequest } from "../middleware/auth";
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+const SERVICE_STATUSES = ["pending", "approved", "rejected", "archived"] as const;
+type ServiceStatus = (typeof SERVICE_STATUSES)[number];
+
+const isServiceStatus = (value: unknown): value is ServiceStatus =>
+  typeof value === "string" &&
+  (SERVICE_STATUSES as readonly string[]).includes(value);
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Text columns an admin may edit. Empty string -> NULL so fields can be cleared.
+const NULLABLE_TEXT_FIELDS = [
+  "type",
+  "formatted_address",
+  "opening_hours",
+  "website",
+  "phone",
+  "wheelchair",
+] as const;
+
+type Parsed<T> = { ok: true; value: T } | { ok: false; message: string };
+
+function restUrl(path = "services"): URL {
+  return new URL(`${process.env.SUPABASE_URL}/rest/v1/${path}`);
+}
+
+function restHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const key = process.env.SUPABASE_SERVICE_KEY!;
+  return {
+    apikey: key,
+    Authorization: `Bearer ${key}`,
+    "Content-Type": "application/json",
+    ...extra,
+  };
+}
+
+/**
+ * Accepts every shape the frontend might reasonably send and returns the
+ * PostGIS EWKT string Supabase expects: "SRID=4326;POINT(lng lat)".
+ *   - null                                  -> clear the location
+ *   - "SRID=4326;POINT(18.42 -33.92)"       -> validated + normalised
+ *   - { lat, lng } / { latitude, longitude } -> converted
+ */
+function parseLocation(input: unknown): Parsed<string | null> {
+  if (input === null) return { ok: true, value: null };
+
+  let lat: number | undefined;
+  let lng: number | undefined;
+
+  if (typeof input === "string") {
+    const match = input
+      .trim()
+      .match(
+        /^(?:SRID=4326;)?POINT\(\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s*\)$/i,
+      );
+    if (!match) {
+      return {
+        ok: false,
+        message: 'location must look like "SRID=4326;POINT(lng lat)"',
+      };
+    }
+    lng = Number(match[1]);
+    lat = Number(match[2]);
+  } else if (typeof input === "object") {
+    const obj = input as Record<string, unknown>;
+    lat = Number(obj.lat ?? obj.latitude);
+    lng = Number(obj.lng ?? obj.longitude);
+  } else {
+    return { ok: false, message: "location has an unsupported format" };
+  }
+
+  if (lat === undefined || lng === undefined || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return { ok: false, message: "location needs numeric latitude and longitude" };
+  }
+  if (lat < -90 || lat > 90) {
+    return { ok: false, message: "latitude must be between -90 and 90" };
+  }
+  if (lng < -180 || lng > 180) {
+    return { ok: false, message: "longitude must be between -180 and 180" };
+  }
+
+  return { ok: true, value: `SRID=4326;POINT(${lng.toFixed(7)} ${lat.toFixed(7)})` };
+}
+
+/** true / false, or null when the row does not exist. */
+async function rowHasLocation(id: string): Promise<boolean | null> {
+  const url = restUrl();
+  url.searchParams.set("id", `eq.${id}`);
+  url.searchParams.set("select", "id,location");
+
+  const response = await fetch(url.toString(), { headers: restHeaders() });
+  if (!response.ok) {
+    throw new Error(`Supabase returned ${response.status}: ${await response.text()}`);
+  }
+  const rows = (await response.json()) as Array<{ id: string; location: unknown }>;
+  if (rows.length === 0) return null;
+  return rows[0].location !== null && rows[0].location !== undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Public reads
+// ---------------------------------------------------------------------------
 
 export async function getServices(
   req: Request,
@@ -27,6 +129,8 @@ export async function getServices(
       .from("services")
       .select("*, category:service_categories(id,name,slug,parent_id)")
       .eq("status", "approved")
+      // A service with no coordinates can never be shown on the map.
+      .not("location", "is", null)
       .limit(limit);
 
     if (type) query = query.eq("category.slug", type);
@@ -91,7 +195,7 @@ export async function getServiceDetails(
     const service = await fetchServiceDetails(req.params.externalId);
 
     if (!service) {
-      res.status(404).json({ message: "Service not found" });
+      res.status(404).json({ error: "Service not found" });
       return;
     }
 
@@ -101,85 +205,172 @@ export async function getServiceDetails(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Admin: edit ANY service, at ANY status
+// ---------------------------------------------------------------------------
+//
+// PATCH /api/services/:id
+// Send only the fields you want to change, e.g.
+//   { location: "SRID=4326;POINT(18.42 -33.92)" }     <- place a pin
+//   { status: "archived" }                            <- hide from the map
+//   { name: "...", phone: "..." }                     <- edit details
+// `status` is OPTIONAL. (The old version demanded it, which is what made
+// every "place on map" request fail with 400.)
 export const updateService = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction,
 ) => {
-  const id = req.params.id?.trim();
-  if (!id) return res.status(400).json({ message: "Service id is required" });
-
   try {
-    const { data: existing, error: findError } = await findServiceById(id);
-    if (findError || !existing) {
-      return res.status(404).json({ message: "Service not found" });
+    const id = req.params.id?.trim();
+    if (!id || !UUID_RE.test(id)) {
+      return res.status(400).json({ error: "A valid service id is required" });
     }
 
-    const {
-      name,
-      type,
-      formatted_address,
-      location,
-      opening_hours,
-      website,
-      phone,
-      wheelchair,
-      sourcename,
-      status,
-    } = req.body;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const updates: Record<string, unknown> = {};
 
-    const updates: Record<string, any> = Object.fromEntries(
-      Object.entries({
-        name,
-        type,
-        formatted_address,
-        location,
-        opening_hours,
-        website,
-        phone,
-        wheelchair,
-        sourcename,
-        status,
-      }).filter(([, value]) => value !== undefined),
-    );
+    // name (required column, so it can't be blanked)
+    if (body.name !== undefined) {
+      if (typeof body.name !== "string" || !body.name.trim()) {
+        return res.status(400).json({ error: "Name cannot be empty" });
+      }
+      updates.name = body.name.trim();
+    }
+
+    // nullable text columns
+    for (const field of NULLABLE_TEXT_FIELDS) {
+      const value = body[field];
+      if (value === undefined) continue;
+      if (value !== null && typeof value !== "string") {
+        return res.status(400).json({ error: `${field} must be text` });
+      }
+      updates[field] = typeof value === "string" && value.trim() ? value.trim() : null;
+    }
+
+    // location
+    if (body.location !== undefined) {
+      const parsed = parseLocation(body.location);
+      if (!parsed.ok) return res.status(400).json({ error: parsed.message });
+      updates.location = parsed.value;
+    }
+
+    // status (+ review metadata)
+    if (body.status !== undefined) {
+      if (!isServiceStatus(body.status)) {
+        return res.status(400).json({
+          error: `status must be one of: ${SERVICE_STATUSES.join(", ")}`,
+        });
+      }
+      const status = body.status;
+      updates.status = status;
+
+      const note =
+        typeof body.review_note === "string" && body.review_note.trim()
+          ? body.review_note.trim()
+          : null;
+
+      if (status === "pending") {
+        // Restoring to the queue: wipe the previous verdict.
+        updates.reviewed_by = null;
+        updates.review_note = note;
+      } else {
+        updates.reviewed_by = req.auth?.userId ?? null;
+        updates.review_note =
+          note ??
+          {
+            approved: "Approved by admin",
+            rejected: "Rejected by admin",
+            archived: "Archived by admin",
+          }[status];
+      }
+    } else if (body.review_note !== undefined) {
+      if (body.review_note !== null && typeof body.review_note !== "string") {
+        return res.status(400).json({ error: "review_note must be text" });
+      }
+      updates.review_note =
+        typeof body.review_note === "string" && body.review_note.trim()
+          ? body.review_note.trim()
+          : null;
+    }
 
     if (Object.keys(updates).length === 0) {
-      return res
-        .status(400)
-        .json({ message: "At least one service field is required" });
+      return res.status(400).json({
+        error:
+          "Nothing to update. Send at least one of: name, type, formatted_address, " +
+          "location, opening_hours, website, phone, wheelchair, status, review_note",
+      });
     }
 
-    if (status && req.auth?.userId) {
-      updates.reviewed_by = req.auth.userId;
-      updates.review_note =
-        req.body.review_note ??
-        (status === "approved" ? "Approved by admin" : "Rejected by admin");
+    // Guard: never approve a service that has no pin.
+    if (updates.status === "approved") {
+      const willHaveLocation =
+        updates.location !== undefined
+          ? updates.location !== null
+          : await rowHasLocation(id);
+
+      if (willHaveLocation === null) {
+        return res.status(404).json({ error: "Service not found" });
+      }
+      if (!willHaveLocation) {
+        return res.status(400).json({
+          error: "Place this service on the map before approving it.",
+        });
+      }
     }
 
-    const { data, error } = await updateServiceDetails(id, updates);
-    if (error) throw error;
+    const url = restUrl();
+    url.searchParams.set("id", `eq.${id}`);
 
-    return res.status(200).json({ data });
+    const response = await fetch(url.toString(), {
+      method: "PATCH",
+      headers: restHeaders({ Prefer: "return=representation" }),
+      body: JSON.stringify(updates),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Supabase returned ${response.status}: ${errorText}`);
+    }
+
+    const data = (await response.json()) as unknown[];
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: "Service not found" });
+    }
+
+    return res.status(200).json({ data: data[0] });
   } catch (error) {
     next(error);
   }
 };
 
+// GET /api/services/by-status?status=pending|approved|rejected|archived|all
+//   optional: &q=<name search>  &missing_location=true  &limit=<1-500>
 export async function getServicesByStatus(
   req: Request,
   res: Response,
   next: NextFunction,
 ) {
   try {
-    const status =
-      typeof req.query.status === "string" ? req.query.status : undefined;
-    const limit = Math.min(Math.max(Number(req.query.limit ?? 50), 1), 200);
+    const rawStatus =
+      typeof req.query.status === "string" ? req.query.status.trim() : "";
+    const statuses =
+      !rawStatus || rawStatus === "all"
+        ? []
+        : rawStatus.split(",").map((s) => s.trim());
 
-    console.log(`\n--- [DEBUG] getServicesByStatus ---`);
-    console.log(`[DEBUG] Querying for status: "${status}"`);
+    if (statuses.some((s) => !isServiceStatus(s))) {
+      return res.status(400).json({
+        error: `status must be one of: ${SERVICE_STATUSES.join(", ")}, all`,
+      });
+    }
 
-    // Construct the raw PostgREST URL
-    const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/services`);
+    const search =
+      typeof req.query.q === "string" ? req.query.q.trim() : "";
+    const missingLocation = req.query.missing_location === "true";
+    const limit = Math.min(Math.max(Number(req.query.limit ?? 100) || 100, 1), 500);
+
+    const url = restUrl();
     url.searchParams.set(
       "select",
       "*,category:service_categories(id,name,slug,parent_id)",
@@ -187,31 +378,23 @@ export async function getServicesByStatus(
     url.searchParams.set("limit", String(limit));
     url.searchParams.set("order", "created_at.desc");
 
-    if (status) {
-      url.searchParams.set("status", `eq.${status}`);
+    if (statuses.length === 1) {
+      url.searchParams.set("status", `eq.${statuses[0]}`);
+    } else if (statuses.length > 1) {
+      url.searchParams.set("status", `in.(${statuses.join(",")})`);
     }
+    if (search) url.searchParams.set("name", `ilike.*${search}*`);
+    if (missingLocation) url.searchParams.set("location", "is.null");
 
-    // Use raw fetch with the service-role key to BYPASS the SDK entirely
-    const response = await fetch(url.toString(), {
-      headers: {
-        apikey: process.env.SUPABASE_SERVICE_KEY!,
-        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_KEY!}`,
-        "Content-Type": "application/json",
-      },
-    });
+    const response = await fetch(url.toString(), { headers: restHeaders() });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.log(
-        `[DEBUG] Supabase raw fetch failed: ${response.status} - ${errorText}`,
-      );
       throw new Error(`Supabase returned ${response.status}: ${errorText}`);
     }
 
-    const data = await response.json();
-    console.log(`[DEBUG] Raw fetch returned ${data?.length ?? 0} rows`);
-
-    const enriched = (data ?? []).map((row: any) => ({
+    const data = (await response.json()) as any[];
+    const enriched = (data ?? []).map((row) => ({
       ...row,
       type: row.category?.name ?? row.type ?? "Service",
     }));
@@ -222,6 +405,10 @@ export async function getServicesByStatus(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Authenticated user: suggestions
+// ---------------------------------------------------------------------------
+
 export async function suggestService(
   req: AuthRequest,
   res: Response,
@@ -231,7 +418,7 @@ export async function suggestService(
     if (!req.auth?.userId) {
       return res
         .status(401)
-        .json({ message: "Authentication required to suggest a service" });
+        .json({ error: "Authentication required to suggest a service" });
     }
 
     const {
@@ -243,10 +430,10 @@ export async function suggestService(
       opening_hours,
       latitude,
       longitude,
-    } = req.body;
+    } = req.body ?? {};
 
     if (!name || typeof name !== "string" || !name.trim()) {
-      return res.status(400).json({ message: "A service name is required" });
+      return res.status(400).json({ error: "A service name is required" });
     }
 
     const location =
@@ -254,7 +441,7 @@ export async function suggestService(
         ? `SRID=4326;POINT(${longitude} ${latitude})`
         : null;
 
-    const { data, error } = await createServiceSuggestion({
+    const newService = {
       name: name.trim(),
       type: type ?? null,
       formatted_address: formatted_address ?? null,
@@ -263,29 +450,53 @@ export async function suggestService(
       website: website ?? null,
       opening_hours: opening_hours ?? null,
       submitted_by: req.auth.userId,
+      status: "pending",
+    };
+
+    // Service-role key so RLS cannot block the insert
+    const response = await fetch(restUrl().toString(), {
+      method: "POST",
+      headers: restHeaders({ Prefer: "return=representation" }),
+      body: JSON.stringify(newService),
     });
 
-    if (error) throw error;
-    return res.status(201).json({ data });
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("[suggestService] Supabase error:", errorText);
+      return res.status(response.status).json({
+        error: "Failed to submit suggestion",
+        details: errorText,
+      });
+    }
+
+    const data = (await response.json()) as unknown[];
+    return res.status(201).json({ data: data[0] });
   } catch (error) {
     next(error);
   }
 }
 
-export async function getMySuggestions(req: AuthRequest, res: Response, next: NextFunction) {
+export async function getMySuggestions(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+) {
   try {
     if (!req.auth?.userId) {
-      return res.status(401).json({ message: 'Authentication required' })
+      return res.status(401).json({ error: "Authentication required" });
     }
-    const { data, error } = await supabase
-      .from('services')
-      .select('id,name,type,status,created_at,review_note')
-      .eq('submitted_by', req.auth.userId)
-      .order('created_at', { ascending: false })
 
-    if (error) throw error
-    res.json(data ?? [])
+    const url = restUrl();
+    url.searchParams.set("select", "id,name,type,status,created_at,review_note");
+    url.searchParams.set("submitted_by", `eq.${req.auth.userId}`);
+    url.searchParams.set("order", "created_at.desc");
+
+    const response = await fetch(url.toString(), { headers: restHeaders() });
+    if (!response.ok) throw new Error(await response.text());
+
+    const data = await response.json();
+    res.json(data ?? []);
   } catch (error) {
-    next(error)
+    next(error);
   }
 }

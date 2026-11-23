@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Building2, TrafficCone, LogOut, Loader2,
   CheckCircle2, AlertCircle, Check, X, Menu,
   Phone, Globe, Clock3, Search, MapPin,
+  Pencil, Archive, RotateCcw, ExternalLink, Layers,
 } from 'lucide-react';
 import {
   getMe,
@@ -14,18 +15,77 @@ import {
   updateServiceStatus,
   updateServiceFields,
   type AdminService,
+  type ServiceStatus,
 } from '../services/api';
 import LeafletMap from '../components/Map/LeafletMap';
 import { useTrafficIncidents } from '../hooks/useTrafficIncidents';
+import { getCoordinates, googleMapsAddressUrl, googleMapsPinUrl } from '../utils/geo';
 import type { Place, Service } from '../types/service.types';
 import type { TrafficIncident } from '../types/traffic.types';
 
-const getCoordinates = (location: any): [number, number] | null => {
-  if (location && typeof location === 'object' && location.coordinates) return location.coordinates;
-  if (typeof location !== 'string') return null;
-  const match = location.match(/(?:SRID=\d+;)?\s*POINT\s*\(\s*(-?[\d.]+)\s+(-?[\d.]+)\s*\)/i);
-  if (match) return [Number(match[1]), Number(match[2])];
-  return null;
+const STATUS_FILTERS: { value: ServiceStatus; label: string }[] = [
+  { value: 'pending', label: 'Pending' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'rejected', label: 'Rejected' },
+  { value: 'archived', label: 'Archived' },
+];
+
+type EditForm = {
+  name: string;
+  type: string;
+  formatted_address: string;
+  phone: string;
+  website: string;
+  opening_hours: string;
+  wheelchair: string;
+  latitude: string;
+  longitude: string;
+};
+
+const toEditForm = (service: AdminService): EditForm => {
+  const coords = getCoordinates(service.location);
+  return {
+    name: service.name ?? '',
+    type: service.type ?? '',
+    formatted_address: service.formatted_address ?? '',
+    phone: service.phone ?? '',
+    website: service.website ?? '',
+    opening_hours: service.opening_hours ?? '',
+    wheelchair: service.wheelchair ?? '',
+    latitude: coords ? String(coords[1]) : '',
+    longitude: coords ? String(coords[0]) : '',
+  };
+};
+
+/** Both blank -> leave the location alone. One blank / out of range -> error. */
+const buildLocation = (
+  latText: string,
+  lngText: string,
+): { ok: true; value: string | null } | { ok: false; message: string } => {
+  const latRaw = latText.trim();
+  const lngRaw = lngText.trim();
+  if (!latRaw && !lngRaw) return { ok: true, value: null };
+  if (!latRaw || !lngRaw) return { ok: false, message: 'Enter both latitude and longitude, or leave both blank.' };
+  const lat = Number(latRaw);
+  const lng = Number(lngRaw);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return { ok: false, message: 'Latitude and longitude must be numbers.' };
+  if (lat < -90 || lat > 90) return { ok: false, message: 'Latitude must be between -90 and 90.' };
+  if (lng < -180 || lng > 180) return { ok: false, message: 'Longitude must be between -180 and 180.' };
+  return { ok: true, value: `SRID=4326;POINT(${lng} ${lat})` };
+};
+
+const linkButtonStyle: React.CSSProperties = {
+  marginTop: 6,
+  fontSize: 11,
+  background: 'transparent',
+  border: 0,
+  padding: 0,
+  color: '#8b5a2b',
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  textDecoration: 'none',
 };
 
 export default function AdminDashboard() {
@@ -35,39 +95,69 @@ export default function AdminDashboard() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   // Tabs
-  const [activeTab, setActiveTab] = useState<'actions' | 'pending'>('actions');
+  const [activeTab, setActiveTab] = useState<'actions' | 'services'>('actions');
 
-  // Action State
+  // System actions
   const [actionLoading, setActionLoading] = useState<'services' | 'traffic' | null>(null);
   const [statusMsg, setStatusMsg] = useState<{ text: string; isError: boolean } | null>(null);
 
-  // Pending Services State
-  const [pendingServices, setPendingServices] = useState<AdminService[]>([]);
-  const [loadingPending, setLoadingPending] = useState(false);
+  // Service list + filters
+  const [statusFilter, setStatusFilter] = useState<ServiceStatus>('pending');
+  const [searchInput, setSearchInput] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const [onlyMissingLocation, setOnlyMissingLocation] = useState(false);
+  const [services, setServices] = useState<AdminService[]>([]);
+  const [loadingList, setLoadingList] = useState(false);
+  const [notice, setNotice] = useState<{ text: string; isError: boolean } | null>(null);
 
-  // Rejection State
+  // Rejection
   const [rejecting, setRejecting] = useState<AdminService | null>(null);
   const [rejectNote, setRejectNote] = useState('');
 
-  // Duplicate Check State
+  // Duplicate check
   const [dupes, setDupes] = useState<Service[]>([]);
   const [dupesFor, setDupesFor] = useState<string | null>(null);
 
-  // Click-to-place State
+  // Click-to-place
   const [placingFor, setPlacingFor] = useState<string | null>(null);
   const [placingError, setPlacingError] = useState('');
 
-  // Map State
-  const mapRef = useRef<any>(null);
-  const [userLocation] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
+  // Edit modal
+  const [editing, setEditing] = useState<AdminService | null>(null);
+  const [editForm, setEditForm] = useState<EditForm | null>(null);
+  const [editError, setEditError] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
 
-  // Admin map: always fetch incidents (the hook used to be dead because
-  // userLocation is a constant null — `Boolean(null)` is `false`).
+  // Map
+  const mapRef = useRef<any>(null);
+  const [satellite, setSatellite] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
   const { incidents } = useTrafficIncidents(true);
 
-  const [places, setPlaces] = useState<Place[]>([]);
-  const [selected, setSelected] = useState<Place | null>(null);
-  const [routeTarget] = useState<Place | null>(null);
+  // Every service in the current list that has a usable pin.
+  const places = useMemo<Place[]>(
+    () =>
+      services.flatMap((s) => {
+        const coords = getCoordinates(s.location);
+        if (!coords) return [];
+        return [
+          {
+            ...s,
+            category: s.type ?? 'Service',
+            parentCategory: null,
+            lat: coords[1],
+            lng: coords[0],
+          } as unknown as Place,
+        ];
+      }),
+    [services],
+  );
+
+  const selected = useMemo(
+    () => places.find((p) => p.id === selectedId) ?? null,
+    [places, selectedId],
+  );
 
   useEffect(() => {
     getMe()
@@ -76,58 +166,50 @@ export default function AdminDashboard() {
       .finally(() => setLoading(false));
   }, [navigate]);
 
-  // PERF: wrapped in useCallback so the placing-on-map effect (which calls
-  // fetchPending) has a stable dependency and doesn't re-register the
-  // Leaflet click listener on every render.
-  const fetchPending = useCallback(async () => {
-    setLoadingPending(true);
+  const fetchServices = useCallback(async () => {
+    setLoadingList(true);
     try {
-      const data = await getServicesByStatus('pending');
-      setPendingServices(data);
-
-      const newPlaces = data
-        .map((s) => {
-          const coords = getCoordinates(s.location);
-          if (!coords) return null;
-          return {
-            ...s,
-            category: s.type ?? 'Service',
-            parentCategory: null,
-            lat: coords[1],
-            lng: coords[0],
-          } as Place;
-        })
-        .filter((p): p is Place => p !== null);
-
-      setPlaces(newPlaces);
+      const data = await getServicesByStatus(statusFilter, {
+        q: appliedSearch || undefined,
+        missingLocation: onlyMissingLocation || undefined,
+        limit: 300,
+      });
+      setServices(data);
     } catch (err) {
-      console.error('Failed to load pending services', err);
+      setServices([]);
+      setNotice({ text: err instanceof Error ? err.message : 'Failed to load services.', isError: true });
     } finally {
-      setLoadingPending(false);
+      setLoadingList(false);
     }
-  }, []);
+  }, [statusFilter, appliedSearch, onlyMissingLocation]);
 
   useEffect(() => {
-    if (activeTab === 'pending') {
-      fetchPending();
-    }
-  }, [activeTab, fetchPending]);
+    if (activeTab === 'services') fetchServices();
+  }, [activeTab, fetchServices]);
 
-  // Click-to-place: while `placingFor` is set, every map click saves a new
-  // POINT for that service. Must live *after* fetchPending is defined.
+  // Click-to-place: while `placingFor` is set, the next map click saves the
+  // pin for that service. It does NOT auto-approve — you get to look at the
+  // pin (try satellite view) and then approve.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !placingFor) return;
 
+    const container = map.getContainer?.() as HTMLElement | undefined;
+    if (container) container.style.cursor = 'crosshair';
+
+    const targetId = placingFor;
     const onClick = async (e: any) => {
-      const { lat, lng } = e.latlng;
+      const { lat, lng } = e.latlng.wrap();
       try {
-        await updateServiceFields(placingFor, {
+        await updateServiceFields(targetId, {
           location: `SRID=4326;POINT(${lng} ${lat})`,
         });
         setPlacingFor(null);
         setPlacingError('');
-        await fetchPending();
+        setNotice({ text: 'Pin saved. Check it on the map, then approve.', isError: false });
+        setSelectedId(targetId);
+        await fetchServices();
+        map.flyTo([lat, lng], 18, { animate: true, duration: 0.8 });
       } catch (err) {
         setPlacingError(err instanceof Error ? err.message : 'Could not save location.');
       }
@@ -136,21 +218,38 @@ export default function AdminDashboard() {
     map.on('click', onClick);
     return () => {
       map.off('click', onClick);
+      if (container) container.style.cursor = '';
     };
-  }, [placingFor, fetchPending]);
+  }, [placingFor, fetchServices]);
+
+  // Keep the matching card in view when a marker is clicked on the map.
+  useEffect(() => {
+    if (!selectedId) return;
+    document.getElementById(`svc-${selectedId}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [selectedId]);
+
+  const removeFromList = (id: string) => {
+    setServices((prev) => prev.filter((s) => s.id !== id));
+    setSelectedId((current) => (current === id ? null : current));
+  };
+
+  const changeStatus = async (service: AdminService, status: ServiceStatus, note?: string) => {
+    try {
+      await updateServiceStatus(service.id, status, note);
+      removeFromList(service.id);
+      setNotice({ text: `"${service.name}" is now ${status}.`, isError: false });
+    } catch (err) {
+      setNotice({ text: err instanceof Error ? err.message : 'Failed to update service.', isError: true });
+    }
+  };
 
   const submitRejection = async () => {
     if (!rejecting) return;
-    try {
-      await updateServiceStatus(rejecting.id, 'rejected', rejectNote.trim() || undefined);
-      setPendingServices((prev) => prev.filter((s) => s.id !== rejecting.id));
-      setPlaces((prev) => prev.filter((p) => p.id !== rejecting.id));
-      if (selected?.id === rejecting.id) setSelected(null);
-      setRejecting(null);
-      setRejectNote('');
-    } catch (err) {
-      alert(`Failed to reject: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    }
+    const target = rejecting;
+    const note = rejectNote.trim() || undefined;
+    setRejecting(null);
+    setRejectNote('');
+    await changeStatus(target, 'rejected', note);
   };
 
   const checkDuplicates = useCallback(async (service: AdminService) => {
@@ -197,24 +296,84 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleUpdateStatus = async (id: string, newStatus: 'approved' | 'rejected') => {
+  const handleSelectFromList = (service: AdminService) => {
+    setSelectedId(service.id);
+    const place = places.find((p) => p.id === service.id);
+    if (place) mapRef.current?.flyTo([place.lat, place.lng], 17, { animate: true, duration: 0.8 });
+  };
+
+  const startPlacing = (service: AdminService) => {
+    setPlacingError('');
+    setPlacingFor(service.id);
+    setIsSidebarOpen(true);
+    // Jump to the existing pin if there is one, so "move pin" starts nearby.
+    const place = places.find((p) => p.id === service.id);
+    if (place) mapRef.current?.flyTo([place.lat, place.lng], 17, { animate: true, duration: 0.8 });
+  };
+
+  const openEdit = (service: AdminService) => {
+    setEditing(service);
+    setEditForm(toEditForm(service));
+    setEditError('');
+  };
+
+  const closeEdit = () => {
+    setEditing(null);
+    setEditForm(null);
+    setEditError('');
+  };
+
+  const saveEdit = async () => {
+    if (!editing || !editForm) return;
+    if (!editForm.name.trim()) {
+      setEditError('Name is required.');
+      return;
+    }
+    const loc = buildLocation(editForm.latitude, editForm.longitude);
+    if (!loc.ok) {
+      setEditError(loc.message);
+      return;
+    }
+
+    setSavingEdit(true);
     try {
-      await updateServiceStatus(id, newStatus);
-      setPendingServices((prev) => prev.filter((s) => s.id !== id));
-      setPlaces((prev) => prev.filter((p) => p.id !== id));
-      if (selected?.id === id) setSelected(null);
+      await updateServiceFields(editing.id, {
+        name: editForm.name.trim(),
+        type: editForm.type.trim() || null,
+        formatted_address: editForm.formatted_address.trim() || null,
+        phone: editForm.phone.trim() || null,
+        website: editForm.website.trim() || null,
+        opening_hours: editForm.opening_hours.trim() || null,
+        wheelchair: editForm.wheelchair.trim() || null,
+        ...(loc.value ? { location: loc.value } : {}),
+      });
+      const savedId = editing.id;
+      closeEdit();
+      setSelectedId(savedId);
+      setNotice({ text: 'Changes saved.', isError: false });
+      await fetchServices();
     } catch (err) {
-      alert(`Failed to update service: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setEditError(err instanceof Error ? err.message : 'Could not save changes.');
+    } finally {
+      setSavingEdit(false);
     }
   };
 
-  const handleSelectFromList = (service: AdminService) => {
-    const place = places.find((p) => p.id === service.id);
-    if (place) {
-      setSelected(place);
-      mapRef.current?.flyTo([place.lat, place.lng], 16, { animate: true, duration: 0.8 });
-    }
-  };
+  const editField = (key: keyof EditForm, label: string, placeholder?: string) => (
+    <>
+      <label className="field-label" htmlFor={`edit-${key}`}>{label}</label>
+      <input
+        id={`edit-${key}`}
+        className="auth-input"
+        value={editForm?.[key] ?? ''}
+        placeholder={placeholder}
+        onChange={(e) => {
+          setEditForm((prev) => (prev ? { ...prev, [key]: e.target.value } : prev));
+          if (editError) setEditError('');
+        }}
+      />
+    </>
+  );
 
   if (loading) {
     return (
@@ -225,6 +384,8 @@ export default function AdminDashboard() {
       </main>
     );
   }
+
+  const editCoords = editForm ? buildLocation(editForm.latitude, editForm.longitude) : null;
 
   return (
     <main className="admin-layout">
@@ -262,6 +423,12 @@ export default function AdminDashboard() {
               <AlertCircle size={16} /><span>{placingError}</span>
             </div>
           )}
+          {notice && (
+            <div className={`admin-status-msg ${notice.isError ? 'error' : 'success'}`}>
+              {notice.isError ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
+              <span>{notice.text}</span>
+            </div>
+          )}
 
           <div className="admin-tabs">
             <button
@@ -271,10 +438,10 @@ export default function AdminDashboard() {
               System Actions
             </button>
             <button
-              className={`admin-tab ${activeTab === 'pending' ? 'active' : ''}`}
-              onClick={() => setActiveTab('pending')}
+              className={`admin-tab ${activeTab === 'services' ? 'active' : ''}`}
+              onClick={() => setActiveTab('services')}
             >
-              Pending Approvals
+              Services
             </button>
           </div>
 
@@ -300,68 +467,170 @@ export default function AdminDashboard() {
             </>
           )}
 
-          {activeTab === 'pending' && (
+          {activeTab === 'services' && (
             <>
-              <h3 className="admin-section-title">Pending Services</h3>
+              <h3 className="admin-section-title">Services</h3>
 
-              {loadingPending ? (
+              <div className="admin-tabs" style={{ flexWrap: 'wrap' }}>
+                {STATUS_FILTERS.map((f) => (
+                  <button
+                    key={f.value}
+                    className={`admin-tab ${statusFilter === f.value ? 'active' : ''}`}
+                    onClick={() => { setStatusFilter(f.value); setDupesFor(null); }}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
+              <form
+                onSubmit={(e) => { e.preventDefault(); setAppliedSearch(searchInput.trim()); }}
+                style={{ display: 'flex', gap: 6, margin: '8px 0' }}
+              >
+                <input
+                  className="auth-input"
+                  style={{ flex: 1, minWidth: 0 }}
+                  placeholder="Search by name…"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                />
+                <button className="admin-action-btn" type="submit"><Search size={14} /></button>
+              </form>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#6b4423', marginBottom: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={onlyMissingLocation}
+                  onChange={(e) => setOnlyMissingLocation(e.target.checked)}
+                />
+                Only services with no map pin
+              </label>
+
+              <button className="admin-btn" type="button" onClick={() => setSatellite((s) => !s)} style={{ marginBottom: 10 }}>
+                <Layers size={18} />
+                {satellite ? 'Street map' : 'Satellite view (confirm buildings)'}
+              </button>
+
+              {loadingList ? (
                 <div style={{ textAlign: 'center', marginTop: 20 }}><Loader2 className="spin" /></div>
-              ) : pendingServices.length === 0 ? (
-                <p style={{ fontSize: 13, color: '#6b4423' }}>No pending services to review.</p>
+              ) : services.length === 0 ? (
+                <p style={{ fontSize: 13, color: '#6b4423' }}>No {statusFilter} services match.</p>
               ) : (
                 <div className="admin-service-list">
-                  {pendingServices.map((service) => (
-                    <div key={service.id} className="admin-service-card">
-                      <div onClick={() => handleSelectFromList(service)}>
-                        <h4>{service.name}</h4>
-                        <p className="admin-card-type">{service.type ?? 'Uncategorised'}</p>
-                        <p>{service.formatted_address || 'No address'}</p>
-                        {service.phone && <p><Phone size={12} /> {service.phone}</p>}
-                        {service.website && <p><Globe size={12} /> {service.website}</p>}
-                        {service.opening_hours && <p><Clock3 size={12} /> {service.opening_hours}</p>}
-                        <p className="admin-card-meta">
-                          Submitted {new Date(service.created_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                      <div className="admin-service-actions">
-                        <button className="admin-action-btn approve" onClick={() => handleUpdateStatus(service.id, 'approved')}>
-                          <Check size={14} /> Approve
-                        </button>
-                        <button className="admin-action-btn reject" onClick={() => setRejecting(service)}>
-                          <X size={14} /> Reject
-                        </button>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => checkDuplicates(service)}
-                        style={{ marginTop: 8, fontSize: 11, background: 'transparent', border: 0, color: '#8b5a2b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                  {services.map((service) => {
+                    const coords = getCoordinates(service.location);
+                    const hasPin = coords !== null;
+                    return (
+                      <div
+                        key={service.id}
+                        id={`svc-${service.id}`}
+                        className="admin-service-card"
+                        style={selectedId === service.id ? { outline: '2px solid #8b5a2b' } : undefined}
                       >
-                        <Search size={12} /> Check for duplicates
-                      </button>
-                      {dupesFor === service.id && (
-                        dupes.length === 0 ? (
-                          <p style={{ fontSize: 11, fontStyle: 'italic', color: '#6b4423', margin: '4px 0 0' }}>
-                            No matching approved services.
+                        <div onClick={() => handleSelectFromList(service)}>
+                          <h4>{service.name}</h4>
+                          <p className="admin-card-type">{service.type ?? 'Uncategorised'}</p>
+                          <p>{service.formatted_address || 'No address'}</p>
+                          {service.phone && <p><Phone size={12} /> {service.phone}</p>}
+                          {service.website && <p><Globe size={12} /> {service.website}</p>}
+                          {service.opening_hours && <p><Clock3 size={12} /> {service.opening_hours}</p>}
+                          {service.review_note && statusFilter !== 'pending' && (
+                            <p style={{ fontStyle: 'italic' }}>Note: {service.review_note}</p>
+                          )}
+                          <p className="admin-card-meta">
+                            Submitted {new Date(service.created_at).toLocaleDateString()}
                           </p>
-                        ) : (
-                          <ul style={{ margin: '4px 0 0', paddingLeft: 16, fontSize: 11, color: '#6b4423' }}>
-                            {dupes.map((d) => (
-                              <li key={d.id}><strong>{d.name}</strong> — {d.formatted_address ?? 'No address'}</li>
-                            ))}
-                          </ul>
-                        )
-                      )}
-                      <button
-                        type="button"
-                        disabled={placingFor === service.id}
-                        onClick={() => { setPlacingError(''); setPlacingFor(service.id); }}
-                        style={{ marginTop: 6, fontSize: 11, background: 'transparent', border: 0, color: '#8b5a2b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
-                      >
-                        <MapPin size={12} />
-                        {placingFor === service.id ? 'Click the map…' : 'Place on map'}
-                      </button>
-                    </div>
-                  ))}
+                          {!hasPin && (
+                            <p style={{ color: '#b5362d', fontSize: 12, fontWeight: 600 }}>
+                              {service.status === 'approved'
+                                ? 'No map pin — users cannot see this service. Place it or archive it.'
+                                : 'No map pin yet — place it on the map before approving.'}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="admin-service-actions">
+                          {service.status === 'pending' && (
+                            <>
+                              <button
+                                className="admin-action-btn approve"
+                                disabled={!hasPin}
+                                title={hasPin ? 'Approve' : 'Place the service on the map first'}
+                                onClick={() => changeStatus(service, 'approved')}
+                              >
+                                <Check size={14} /> Approve
+                              </button>
+                              <button className="admin-action-btn reject" onClick={() => setRejecting(service)}>
+                                <X size={14} /> Reject
+                              </button>
+                            </>
+                          )}
+                          {service.status === 'approved' && (
+                            <button className="admin-action-btn" onClick={() => changeStatus(service, 'archived')}>
+                              <Archive size={14} /> Archive
+                            </button>
+                          )}
+                          {(service.status === 'rejected' || service.status === 'archived') && (
+                            <button className="admin-action-btn" onClick={() => changeStatus(service, 'pending')}>
+                              <RotateCcw size={14} /> Restore to pending
+                            </button>
+                          )}
+                        </div>
+
+                        <button type="button" onClick={() => openEdit(service)} style={linkButtonStyle}>
+                          <Pencil size={12} /> Edit details
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={placingFor === service.id}
+                          onClick={() => startPlacing(service)}
+                          style={linkButtonStyle}
+                        >
+                          <MapPin size={12} />
+                          {placingFor === service.id ? 'Click the map…' : hasPin ? 'Move pin' : 'Place on map'}
+                        </button>
+
+                        {service.formatted_address && (
+                          <a
+                            href={googleMapsAddressUrl(service.formatted_address)}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={linkButtonStyle}
+                          >
+                            <ExternalLink size={12} /> Verify address on Google Maps
+                          </a>
+                        )}
+                        {coords && (
+                          <a
+                            href={googleMapsPinUrl(coords[1], coords[0])}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={linkButtonStyle}
+                          >
+                            <ExternalLink size={12} /> Open pin in Google Maps
+                          </a>
+                        )}
+
+                        <button type="button" onClick={() => checkDuplicates(service)} style={linkButtonStyle}>
+                          <Search size={12} /> Check for duplicates
+                        </button>
+                        {dupesFor === service.id && (
+                          dupes.length === 0 ? (
+                            <p style={{ fontSize: 11, fontStyle: 'italic', color: '#6b4423', margin: '4px 0 0' }}>
+                              No matching approved services.
+                            </p>
+                          ) : (
+                            <ul style={{ margin: '4px 0 0', paddingLeft: 16, fontSize: 11, color: '#6b4423' }}>
+                              {dupes.map((d) => (
+                                <li key={d.id}><strong>{d.name}</strong> — {d.formatted_address ?? 'No address'}</li>
+                              ))}
+                            </ul>
+                          )
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </>
@@ -386,12 +655,12 @@ export default function AdminDashboard() {
         <LeafletMap
           places={places}
           selected={selected}
-          onSelect={setSelected}
+          onSelect={(place) => setSelectedId(place.id)}
           mapRef={mapRef}
-          satellite={false}
-          userLocation={userLocation}
+          satellite={satellite}
+          userLocation={null}
           incidents={incidents as TrafficIncident[]}
-          routeTarget={routeTarget}
+          routeTarget={null}
         />
       </section>
 
@@ -416,6 +685,81 @@ export default function AdminDashboard() {
             />
             <button className="submit-button" type="button" onClick={submitRejection} style={{ marginTop: 12 }}>
               Reject service
+            </button>
+          </div>
+        </div>
+      )}
+
+      {editing && editForm && (
+        <div className="suggest-overlay" onClick={closeEdit}>
+          <div
+            className="suggest-modal"
+            style={{ maxHeight: '90vh', overflowY: 'auto' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button className="suggest-close" onClick={closeEdit} aria-label="Close">
+              <X size={18} />
+            </button>
+            <h2>Edit service</h2>
+            <p className="suggest-hint">Status: <strong>{editing.status}</strong></p>
+
+            {editError && <p className="form-error" role="alert">{editError}</p>}
+
+            {editField('name', 'Name *')}
+            {editField('type', 'Category')}
+            {editField('formatted_address', 'Address')}
+            {editField('phone', 'Phone')}
+            {editField('website', 'Website')}
+            {editField('opening_hours', 'Opening hours')}
+            {editField('wheelchair', 'Wheelchair access', 'yes / no / limited / unknown')}
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>{editField('latitude', 'Latitude', '-33.9249')}</div>
+              <div style={{ flex: 1 }}>{editField('longitude', 'Longitude', '18.4241')}</div>
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 8 }}>
+              <button
+                type="button"
+                style={linkButtonStyle}
+                onClick={() => {
+                  const target = editing;
+                  closeEdit();
+                  startPlacing(target);
+                }}
+              >
+                <MapPin size={12} /> Pick location on the map
+              </button>
+              {editForm.formatted_address.trim() && (
+                <a
+                  href={googleMapsAddressUrl(editForm.formatted_address.trim())}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={linkButtonStyle}
+                >
+                  <ExternalLink size={12} /> Verify address on Google Maps
+                </a>
+              )}
+              {editCoords?.ok && editCoords.value && (
+                <a
+                  href={googleMapsPinUrl(Number(editForm.latitude), Number(editForm.longitude))}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={linkButtonStyle}
+                >
+                  <ExternalLink size={12} /> Open pin in Google Maps
+                </a>
+              )}
+            </div>
+
+            <button
+              className="submit-button"
+              type="button"
+              onClick={saveEdit}
+              disabled={savingEdit}
+              style={{ marginTop: 12 }}
+            >
+              {savingEdit ? 'Saving…' : 'Save changes'}
             </button>
           </div>
         </div>
