@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 
 import serviceRoutes from './routes/serviceRoutes';
 import authRoutes from './routes/authRoutes';
@@ -44,6 +45,12 @@ if (trafficImportIntervalMs > 0) {
 		importTrafficIncidents().catch((error) => console.error('[import] traffic import failed', error));
 	}, trafficImportIntervalMs);
 }
+
+app.use('/api/', rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  message: { error: 'Too many requests, please try again in a minute.' },
+}));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
