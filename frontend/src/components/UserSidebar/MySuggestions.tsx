@@ -18,7 +18,7 @@ export function MySuggestions() {
 
   useEffect(() => {
     const token = localStorage.getItem('servicefinder_access_token');
-    fetch(`${import.meta.env.VITE_API_BASE_URL}/services/mine`, {
+    fetch(`${import.meta.env.VITE_API_BASE_URL}/services/my-suggestions`, {
       headers: { Authorization: `Bearer ${token}` }
     })
       .then(res => res.ok ? res.json() : Promise.reject('Failed to load'))

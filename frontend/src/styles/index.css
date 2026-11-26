@@ -2622,3 +2622,50 @@ a {
 	background: #8c6337;
 	color: #fdf2d0;
 }
+
+/* =========================================
+   ROLE SWITCHER
+   ========================================= */
+/* =========================================
+   ROLE SWITCHER (inside admin sidebar)
+   ========================================= */
+.role-switcher {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	width: 100%;
+	border: 1px solid #8b5a2b;
+	background: #fff;
+	box-shadow: 0 1px 3px rgba(88, 47, 16, 0.15);
+}
+
+.role-switcher button {
+	width: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	/* ← left-aligned */
+	gap: 10px;
+	padding: 12px;
+	border: 0;
+	background: #fff;
+	color: #4a2b16;
+	font: 600 14px 'Cormorant SC', serif;
+	letter-spacing: 1px;
+	text-transform: uppercase;
+	cursor: pointer;
+	transition: background 0.2s;
+}
+
+.role-switcher button:first-child {
+	border-bottom: 1px solid #8b5a2b;
+}
+
+.role-switcher button:hover {
+	background: #f4d18c;
+}
+
+.role-switcher button.active {
+	background: #65421f;
+	color: #fce5ae;
+}

@@ -5,6 +5,7 @@ import {
   CheckCircle2, AlertCircle, Check, X, Menu,
   Phone, Globe, Clock3, Search, MapPin,
   Pencil, Archive, RotateCcw, ExternalLink, Layers,
+  List, LayoutGrid,
 } from 'lucide-react';
 import {
   getMe,
@@ -19,6 +20,7 @@ import {
 } from '../services/api';
 import LeafletMap from '../components/Map/LeafletMap';
 import { useTrafficIncidents } from '../hooks/useTrafficIncidents';
+import RoleSwitcher from '../components/common/RoleSwitcher';
 import { getCoordinates, googleMapsAddressUrl, googleMapsPinUrl } from '../utils/geo';
 import type { Place, Service } from '../types/service.types';
 import type { TrafficIncident } from '../types/traffic.types';
@@ -57,7 +59,6 @@ const toEditForm = (service: AdminService): EditForm => {
   };
 };
 
-/** Both blank -> leave the location alone. One blank / out of range -> error. */
 const buildLocation = (
   latText: string,
   lngText: string,
@@ -94,14 +95,10 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-  // Tabs
   const [activeTab, setActiveTab] = useState<'actions' | 'services'>('actions');
-
-  // System actions
   const [actionLoading, setActionLoading] = useState<'services' | 'traffic' | null>(null);
   const [statusMsg, setStatusMsg] = useState<{ text: string; isError: boolean } | null>(null);
 
-  // Service list + filters
   const [statusFilter, setStatusFilter] = useState<ServiceStatus>('pending');
   const [searchInput, setSearchInput] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
@@ -110,32 +107,28 @@ export default function AdminDashboard() {
   const [loadingList, setLoadingList] = useState(false);
   const [notice, setNotice] = useState<{ text: string; isError: boolean } | null>(null);
 
-  // Rejection
+  const [detailedView, setDetailedView] = useState(false);
+
   const [rejecting, setRejecting] = useState<AdminService | null>(null);
   const [rejectNote, setRejectNote] = useState('');
 
-  // Duplicate check
   const [dupes, setDupes] = useState<Service[]>([]);
   const [dupesFor, setDupesFor] = useState<string | null>(null);
 
-  // Click-to-place
   const [placingFor, setPlacingFor] = useState<string | null>(null);
   const [placingError, setPlacingError] = useState('');
 
-  // Edit modal
   const [editing, setEditing] = useState<AdminService | null>(null);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [editError, setEditError] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
-  // Map
   const mapRef = useRef<any>(null);
   const [satellite, setSatellite] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const { incidents } = useTrafficIncidents(true);
 
-  // Every service in the current list that has a usable pin.
   const places = useMemo<Place[]>(
     () =>
       services.flatMap((s) => {
@@ -187,16 +180,11 @@ export default function AdminDashboard() {
     if (activeTab === 'services') fetchServices();
   }, [activeTab, fetchServices]);
 
-  // Click-to-place: while `placingFor` is set, the next map click saves the
-  // pin for that service. It does NOT auto-approve — you get to look at the
-  // pin (try satellite view) and then approve.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !placingFor) return;
-
     const container = map.getContainer?.() as HTMLElement | undefined;
     if (container) container.style.cursor = 'crosshair';
-
     const targetId = placingFor;
     const onClick = async (e: any) => {
       const { lat, lng } = e.latlng.wrap();
@@ -214,7 +202,6 @@ export default function AdminDashboard() {
         setPlacingError(err instanceof Error ? err.message : 'Could not save location.');
       }
     };
-
     map.on('click', onClick);
     return () => {
       map.off('click', onClick);
@@ -222,7 +209,6 @@ export default function AdminDashboard() {
     };
   }, [placingFor, fetchServices]);
 
-  // Keep the matching card in view when a marker is clicked on the map.
   useEffect(() => {
     if (!selectedId) return;
     document.getElementById(`svc-${selectedId}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -306,7 +292,6 @@ export default function AdminDashboard() {
     setPlacingError('');
     setPlacingFor(service.id);
     setIsSidebarOpen(true);
-    // Jump to the existing pin if there is one, so "move pin" starts nearby.
     const place = places.find((p) => p.id === service.id);
     if (place) mapRef.current?.flyTo([place.lat, place.lng], 17, { animate: true, duration: 0.8 });
   };
@@ -334,7 +319,6 @@ export default function AdminDashboard() {
       setEditError(loc.message);
       return;
     }
-
     setSavingEdit(true);
     try {
       await updateServiceFields(editing.id, {
@@ -397,6 +381,8 @@ export default function AdminDashboard() {
         {isSidebarOpen ? 'Close Panel' : 'Admin Menu'}
       </button>
 
+      <RoleSwitcher />
+
       <aside className={`admin-sidebar ${isSidebarOpen ? 'open' : ''}`}>
         <div className="admin-sidebar-header">
           <h2>ADMIN PANEL</h2>
@@ -448,14 +434,12 @@ export default function AdminDashboard() {
           {activeTab === 'actions' && (
             <>
               <h3 className="admin-section-title">System Actions</h3>
-
               {statusMsg && (
                 <div className={`admin-status-msg ${statusMsg.isError ? 'error' : 'success'}`}>
                   {statusMsg.isError ? <AlertCircle size={16} /> : <CheckCircle2 size={16} />}
                   <span>{statusMsg.text}</span>
                 </div>
               )}
-
               <button className="admin-btn" onClick={handleImportServices} disabled={actionLoading !== null}>
                 {actionLoading === 'services' ? <Loader2 size={18} className="spin" /> : <Building2 size={18} />}
                 Import Services
@@ -469,7 +453,29 @@ export default function AdminDashboard() {
 
           {activeTab === 'services' && (
             <>
-              <h3 className="admin-section-title">Services</h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <h3 className="admin-section-title" style={{ marginBottom: 0, borderBottom: 'none' }}>Services</h3>
+                <button
+                  onClick={() => setDetailedView(!detailedView)}
+                  style={{
+                    background: '#fff',
+                    border: '1px solid #8b5a2b',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    color: '#4a2b16',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    padding: '4px 8px',
+                    fontFamily: 'DM Sans, sans-serif',
+                  }}
+                  title={detailedView ? 'Switch to Simplified View' : 'Switch to Detailed View'}
+                >
+                  {detailedView ? <><List size={14} /> Simplified</> : <><LayoutGrid size={14} /> Detailed</>}
+                </button>
+              </div>
 
               <div className="admin-tabs" style={{ flexWrap: 'wrap' }}>
                 {STATUS_FILTERS.map((f) => (
@@ -530,13 +536,44 @@ export default function AdminDashboard() {
                         <div onClick={() => handleSelectFromList(service)}>
                           <h4>{service.name}</h4>
                           <p className="admin-card-type">{service.type ?? 'Uncategorised'}</p>
-                          <p>{service.formatted_address || 'No address'}</p>
-                          {service.phone && <p><Phone size={12} /> {service.phone}</p>}
-                          {service.website && <p><Globe size={12} /> {service.website}</p>}
-                          {service.opening_hours && <p><Clock3 size={12} /> {service.opening_hours}</p>}
-                          {service.review_note && statusFilter !== 'pending' && (
-                            <p style={{ fontStyle: 'italic' }}>Note: {service.review_note}</p>
+
+                          {detailedView && (
+                            <>
+                              {service.formatted_address && (
+                                <p style={{ fontSize: 13, lineHeight: 1.4, whiteSpace: 'normal', marginBottom: 4 }}>
+                                  {service.formatted_address}
+                                </p>
+                              )}
+                              {service.phone && (
+                                <p style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, marginBottom: 4, whiteSpace: 'normal' }}>
+                                  <Phone size={12} /> {service.phone}
+                                </p>
+                              )}
+                              {service.website && (
+                                <p style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, marginBottom: 4, whiteSpace: 'normal' }}>
+                                  <Globe size={12} />
+                                  <a href={service.website} target="_blank" rel="noreferrer" style={{ color: '#8b5a2b' }}>
+                                    {service.website}
+                                  </a>
+                                </p>
+                              )}
+                              {service.opening_hours && (
+                                <p style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, marginBottom: 4, whiteSpace: 'normal' }}>
+                                  <Clock3 size={12} /> {service.opening_hours}
+                                </p>
+                              )}
+                              {service.review_note && statusFilter !== 'pending' && (
+                                <p style={{ fontSize: 12, fontStyle: 'italic', marginBottom: 4, whiteSpace: 'normal' }}>
+                                  Note: {service.review_note}
+                                </p>
+                              )}
+                            </>
                           )}
+
+                          {!detailedView && service.review_note && statusFilter !== 'pending' && (
+                            <p style={{ fontStyle: 'italic', fontSize: 12 }}>Note: {service.review_note}</p>
+                          )}
+
                           <p className="admin-card-meta">
                             Submitted {new Date(service.created_at).toLocaleDateString()}
                           </p>
@@ -591,42 +628,35 @@ export default function AdminDashboard() {
                           {placingFor === service.id ? 'Click the map…' : hasPin ? 'Move pin' : 'Place on map'}
                         </button>
 
-                        {service.formatted_address && (
-                          <a
-                            href={googleMapsAddressUrl(service.formatted_address)}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={linkButtonStyle}
-                          >
-                            <ExternalLink size={12} /> Verify address on Google Maps
-                          </a>
-                        )}
-                        {coords && (
-                          <a
-                            href={googleMapsPinUrl(coords[1], coords[0])}
-                            target="_blank"
-                            rel="noreferrer"
-                            style={linkButtonStyle}
-                          >
-                            <ExternalLink size={12} /> Open pin in Google Maps
-                          </a>
-                        )}
-
-                        <button type="button" onClick={() => checkDuplicates(service)} style={linkButtonStyle}>
-                          <Search size={12} /> Check for duplicates
-                        </button>
-                        {dupesFor === service.id && (
-                          dupes.length === 0 ? (
-                            <p style={{ fontSize: 11, fontStyle: 'italic', color: '#6b4423', margin: '4px 0 0' }}>
-                              No matching approved services.
-                            </p>
-                          ) : (
-                            <ul style={{ margin: '4px 0 0', paddingLeft: 16, fontSize: 11, color: '#6b4423' }}>
-                              {dupes.map((d) => (
-                                <li key={d.id}><strong>{d.name}</strong> — {d.formatted_address ?? 'No address'}</li>
-                              ))}
-                            </ul>
-                          )
+                        {detailedView && (
+                          <>
+                            {service.formatted_address && (
+                              <a href={googleMapsAddressUrl(service.formatted_address)} target="_blank" rel="noreferrer" style={linkButtonStyle}>
+                                <ExternalLink size={12} /> Verify address on Google Maps
+                              </a>
+                            )}
+                            {coords && (
+                              <a href={googleMapsPinUrl(coords[1], coords[0])} target="_blank" rel="noreferrer" style={linkButtonStyle}>
+                                <ExternalLink size={12} /> Open pin in Google Maps
+                              </a>
+                            )}
+                            <button type="button" onClick={() => checkDuplicates(service)} style={linkButtonStyle}>
+                              <Search size={12} /> Check for duplicates
+                            </button>
+                            {dupesFor === service.id && (
+                              dupes.length === 0 ? (
+                                <p style={{ fontSize: 11, fontStyle: 'italic', color: '#6b4423', margin: '4px 0 0' }}>
+                                  No matching approved services.
+                                </p>
+                              ) : (
+                                <ul style={{ margin: '4px 0 0', paddingLeft: 16, fontSize: 11, color: '#6b4423' }}>
+                                  {dupes.map((d) => (
+                                    <li key={d.id}><strong>{d.name}</strong> — {d.formatted_address ?? 'No address'}</li>
+                                  ))}
+                                </ul>
+                              )
+                            )}
+                          </>
                         )}
                       </div>
                     );
@@ -637,6 +667,11 @@ export default function AdminDashboard() {
           )}
 
           <h3 className="admin-section-title" style={{ marginTop: '40px' }}>Session</h3>
+
+            <div style={{ marginBottom: '10px' }}>
+              <RoleSwitcher />
+            </div>
+          
           <button
             className="admin-btn danger"
             onClick={() => {
@@ -702,9 +737,7 @@ export default function AdminDashboard() {
             </button>
             <h2>Edit service</h2>
             <p className="suggest-hint">Status: <strong>{editing.status}</strong></p>
-
             {editError && <p className="form-error" role="alert">{editError}</p>}
-
             {editField('name', 'Name *')}
             {editField('type', 'Category')}
             {editField('formatted_address', 'Address')}
@@ -712,12 +745,10 @@ export default function AdminDashboard() {
             {editField('website', 'Website')}
             {editField('opening_hours', 'Opening hours')}
             {editField('wheelchair', 'Wheelchair access', 'yes / no / limited / unknown')}
-
             <div style={{ display: 'flex', gap: 8 }}>
               <div style={{ flex: 1 }}>{editField('latitude', 'Latitude', '-33.9249')}</div>
               <div style={{ flex: 1 }}>{editField('longitude', 'Longitude', '18.4241')}</div>
             </div>
-
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 8 }}>
               <button
                 type="button"
@@ -731,27 +762,16 @@ export default function AdminDashboard() {
                 <MapPin size={12} /> Pick location on the map
               </button>
               {editForm.formatted_address.trim() && (
-                <a
-                  href={googleMapsAddressUrl(editForm.formatted_address.trim())}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={linkButtonStyle}
-                >
+                <a href={googleMapsAddressUrl(editForm.formatted_address.trim())} target="_blank" rel="noreferrer" style={linkButtonStyle}>
                   <ExternalLink size={12} /> Verify address on Google Maps
                 </a>
               )}
               {editCoords?.ok && editCoords.value && (
-                <a
-                  href={googleMapsPinUrl(Number(editForm.latitude), Number(editForm.longitude))}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={linkButtonStyle}
-                >
+                <a href={googleMapsPinUrl(Number(editForm.latitude), Number(editForm.longitude))} target="_blank" rel="noreferrer" style={linkButtonStyle}>
                   <ExternalLink size={12} /> Open pin in Google Maps
                 </a>
               )}
             </div>
-
             <button
               className="submit-button"
               type="button"
