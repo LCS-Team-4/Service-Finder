@@ -15,12 +15,20 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Rate limiter: 60 requests per minute per IP.
+// Mounted BEFORE the routes so every /api/* call is throttled.
+app.use('/api/', rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again in a minute.' },
+}));
+
 app.use('/api/services', serviceRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/traffic-incidents', accidentRoutes);
-app.use(notFoundHandler);
-app.use(errorHandler);
 
 const importIntervalMs = Number(process.env.IMPORT_INTERVAL_MS || 0);
 if (process.env.AUTO_IMPORT_SERVICES === 'true') {
@@ -46,11 +54,9 @@ if (trafficImportIntervalMs > 0) {
 	}, trafficImportIntervalMs);
 }
 
-app.use('/api/', rateLimit({
-  windowMs: 60 * 1000,
-  max: 60,
-  message: { error: 'Too many requests, please try again in a minute.' },
-}));
+// Fallback handlers must be registered LAST so they catch anything the routes above didn't handle.
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
